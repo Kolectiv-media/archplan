@@ -1837,11 +1837,13 @@ export default function App(){
   const [projectsReady,setProjectsReady]=useState(false);
   const [projectsError,setProjectsError]=useState(null);
   const [projectsFromCache,setProjectsFromCache]=useState(false);
+  const [lastSyncTime,setLastSyncTime]=useState(null);
   const projectsReadyRef=useRef(false);
+  const projectsFromCacheRef=useRef(true);
   useEffect(()=>{
     if(!user){
       setProjects([]);setProjectsReady(false);setProjectsError(null);
-      setProjectsFromCache(false);projectsReadyRef.current=false;
+      setProjectsFromCache(false);projectsReadyRef.current=false;projectsFromCacheRef.current=true;
       return;
     }
     // 1. Show localStorage cache instantly — projects appear before network
@@ -1856,16 +1858,19 @@ export default function App(){
     const unsub=listenProjects(
       user.uid,
       (ps,fromCache)=>{
+        // Never wipe localStorage-loaded projects with an empty in-memory snapshot.
+        // fromCache+empty = Firestore SDK initial state before server responds; ignore it.
+        if(fromCache && ps.length===0) return;
         setProjects(ps);setProjectsReady(true);setProjectsError(null);
-        setProjectsFromCache(fromCache);projectsReadyRef.current=true;
-        // Persist server-confirmed data so next refresh is instant
-        if(!fromCache) saveProjectCache(user.uid,ps);
+        setProjectsFromCache(fromCache);projectsReadyRef.current=true;projectsFromCacheRef.current=fromCache;
+        if(!fromCache){ saveProjectCache(user.uid,ps);setLastSyncTime(new Date()); }
       },
       (err)=>{setProjectsError(err.code||err.message);}
     );
-    // 3. Force reconnect after 15s if Firestore still hasn't responded
-    const syncTimer=setTimeout(()=>{ if(!projectsReadyRef.current) forceFirestoreSync(); },15000);
-    return ()=>{ unsub(); clearTimeout(syncTimer); projectsReadyRef.current=false; };
+    // 3. Try reconnect at 10s, then every 20s while still in cache mode
+    const t1=setTimeout(()=>{ if(projectsFromCacheRef.current) forceFirestoreSync(); },10000);
+    const t2=setInterval(()=>{ if(projectsFromCacheRef.current) forceFirestoreSync(); },20000);
+    return ()=>{ unsub(); clearTimeout(t1); clearInterval(t2); projectsReadyRef.current=false;projectsFromCacheRef.current=true; };
   },[user]);
 
   // Auto-save to localStorage on every project change (covers all mutations)
@@ -2659,14 +2664,18 @@ export default function App(){
         <span style={{fontSize:10,color:T.textDim}}>Arhitectură · Urbanism · Design</span>
         <div style={{marginLeft:"auto",display:"flex",gap:14,alignItems:"center"}}>
           {/* Firestore sync indicator */}
-          <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}} onClick={()=>forceFirestoreSync()} title="Click pentru a forța sincronizarea">
+          <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}} onClick={()=>forceFirestoreSync()}
+            title={`Click pentru a forța sincronizarea\nCont: ${user?.email||'—'}\nUID: ${user?.uid||'—'}\nUltima sincronizare: ${lastSyncTime?lastSyncTime.toLocaleTimeString('ro-RO'):'niciodată'}`}>
             <div style={{width:6,height:6,borderRadius:'50%',flexShrink:0,
               background:!fsOnline?T.red:projectsReady&&!projectsFromCache?T.green:T.amber,
-              animation:projectsReady&&projectsFromCache?'pulse 1.5s ease infinite':undefined}}/>
+              animation:projectsFromCache&&projectsReady?'pulse 1.5s ease infinite':undefined}}/>
             <span style={{fontSize:10,fontWeight:600,
               color:!fsOnline?T.red:projectsReady&&!projectsFromCache?T.green:T.amber}}>
-              {!fsOnline?'Offline':projectsReady&&!projectsFromCache?'Sincronizat':'Sincronizare…'}
+              {!fsOnline?'Offline':projectsReady&&!projectsFromCache
+                ?`Sincronizat ${lastSyncTime?lastSyncTime.toLocaleTimeString('ro-RO',{hour:'2-digit',minute:'2-digit'}):''}`.trim()
+                :'Sincronizare…'}
             </span>
+            {user&&<span style={{fontSize:9,color:T.textDim,fontFamily:'monospace',marginLeft:2}}>({user.email?.split('@')[0]})</span>}
           </div>
           <div style={{height:10,width:1,background:T.border}}/>
           <span style={{fontSize:10,color:T.textDim,fontFamily:'monospace'}}>v{__BUILD_DATE__}</span>
