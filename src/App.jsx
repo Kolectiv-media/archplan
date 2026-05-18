@@ -2247,6 +2247,11 @@ export default function App(){
             <span style={{position:'absolute',top:-4,right:-4,width:8,height:8,borderRadius:'50%',background:T.red}}/>
           </button>
         )}
+        {/* User account indicator — visible email so cross-device account mismatch is obvious */}
+        <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 8px',background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,maxWidth:180,overflow:'hidden'}}>
+          <div style={{width:6,height:6,borderRadius:'50%',background:T.green,flexShrink:0}}/>
+          <span style={{fontSize:10,color:T.textMd,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:'monospace'}}>{user?.email||'—'}</span>
+        </div>
         {/* User avatar */}
         <div style={{position:"relative",flexShrink:0}}>
           <div onClick={e=>{e.stopPropagation();setUMenu(s=>!s);}} style={{cursor:"pointer"}}>
