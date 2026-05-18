@@ -117,12 +117,19 @@ const makeMsgs = (channel) => {
 
 /* ─── HELPERS ────────────────────────────────────────────────────────────────── */
 const uid   = () => Math.random().toString(36).slice(2,8);
-// Local timezone date string (YYYY-MM-DD) — avoids UTC offset issues (e.g. Romania UTC+2/+3)
+// Local timezone date string (YYYY-MM-DD) — avoids UTC offset issues for Romania (UTC+2/+3)
 const localDate = (d=new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const TODAY = localDate();
 const diffD = (a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
-const fmt   = d=>d?new Date(d+'T12:00:00').toLocaleDateString("ro-RO",{day:"2-digit",month:"short",year:"numeric"}):"—";
-const fmtS  = d=>d?new Date(d+'T12:00:00').toLocaleDateString("ro-RO",{day:"2-digit",month:"short"}):"—";
+// Parse date strings safely: date-only strings (YYYY-MM-DD) are parsed at local
+// noon to prevent UTC midnight from shifting the displayed day in UTC+2/+3.
+const parseDate = (d) => {
+  if(!d) return null;
+  if(typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)) return new Date(d+'T12:00:00');
+  return new Date(d);
+};
+const fmt   = d=>{ const p=parseDate(d); return p?p.toLocaleDateString("ro-RO",{day:"2-digit",month:"short",year:"numeric"}):"—"; };
+const fmtS  = d=>{ const p=parseDate(d); return p?p.toLocaleDateString("ro-RO",{day:"2-digit",month:"short"}):"—"; };
 const fmtT  = d=>d instanceof Date?d.toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"}):"—";
 const pctOf = phases=>phases.length?Math.round(phases.filter(p=>p.status==="approved").length/phases.length*100):0;
 
@@ -237,8 +244,8 @@ const mkAvize=(start,sts={})=>INST.map(inst=>({
   contactName:"",note:"",attachments:[],
   steps:inst.Icon?[
     {stepId:uid(),name:`Solicitare aviz ${inst.short.toLowerCase()}`,status:["approved","in_progress","submitted"].includes(sts[inst.id])?"approved":"pending",date:start},
-    {stepId:uid(),name:"Depunere documentație",status:sts[inst.id]==="approved"?"approved":"pending",date:new Date(new Date(start).getTime()+14*86400000).toISOString().slice(0,10)},
-    {stepId:uid(),name:`Obținere aviz`,status:sts[inst.id]==="approved"?"approved":"pending",date:new Date(new Date(start).getTime()+28*86400000).toISOString().slice(0,10)},
+    {stepId:uid(),name:"Depunere documentație",status:sts[inst.id]==="approved"?"approved":"pending",date:addDays(start,14)},
+    {stepId:uid(),name:`Obținere aviz`,status:sts[inst.id]==="approved"?"approved":"pending",date:addDays(start,28)},
   ]:[],
 }));
 
@@ -1149,7 +1156,7 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
                       <input type="date" value={av.submissionDate||''} onChange={e=>{
                         const sd=e.target.value
                         const updates={submissionDate:sd}
-                        if(sd){const d=new Date(sd);d.setDate(d.getDate()+30);updates.estimatedDate=d.toISOString().slice(0,10)}
+                        if(sd){updates.estimatedDate=addWorkDays(sd,30)}
                         onUpdate(av.avizId,updates)
                       }} style={{width:'100%',background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:6,padding:'5px 8px',color:T.text,fontSize:11,outline:'none',fontFamily:'inherit',boxSizing:'border-box'}}/>
                     </div>
@@ -1158,7 +1165,7 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
                       <input type="date" value={av.estimatedDate||''} onChange={e=>onUpdate(av.avizId,{estimatedDate:e.target.value})}
                         style={{width:'100%',background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:6,padding:'5px 8px',color:T.text,fontSize:11,outline:'none',fontFamily:'inherit',boxSizing:'border-box'}}/>
                       {av.submissionDate&&!av.estimatedDate&&(
-                        <button onClick={()=>{const d=new Date(av.submissionDate);d.setDate(d.getDate()+30);onUpdate(av.avizId,{estimatedDate:d.toISOString().slice(0,10)})}}
+                        <button onClick={()=>onUpdate(av.avizId,{estimatedDate:addWorkDays(av.submissionDate,30)})}
                           style={{marginTop:4,fontSize:9,background:T.accentBg,border:`1px solid ${T.accent}33`,color:T.accentLt,borderRadius:4,padding:'2px 6px',cursor:'pointer',fontFamily:'inherit'}}>+ 30 zile auto</button>
                       )}
                     </div>
@@ -1186,7 +1193,7 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
                       {av.emissionDate&&(
                         <div style={{display:'flex',gap:4,marginTop:4}}>
                           {[12,24].map(m=>(
-                            <button key={m} onClick={()=>{const b=new Date(av.emissionDate);b.setMonth(b.getMonth()+m);onUpdate(av.avizId,{expiryDate:b.toISOString().slice(0,10)})}}
+                            <button key={m} onClick={()=>{const b=new Date(av.emissionDate+'T12:00:00');b.setMonth(b.getMonth()+m);onUpdate(av.avizId,{expiryDate:localDate(b)})}}
                               style={{flex:1,background:T.accentBg,border:`1px solid ${T.accent}33`,borderRadius:5,padding:'3px 0',color:T.accentLt,fontSize:10,cursor:'pointer',fontFamily:'inherit',fontWeight:600}}>
                               +{m} luni
                             </button>
@@ -1821,23 +1828,18 @@ export default function App(){
   const projectsReadyRef=useRef(false);
   useEffect(()=>{
     if(!user){setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;return;}
-    setProjectsReady(false);setProjectsError(null);projectsReadyRef.current=false;
-    // Show localStorage cache instantly while Firestore connects
-    try{
-      const c=JSON.parse(localStorage.getItem(`ap_p_${user.uid}`)||'null');
-      if(c?.d?.length){setProjects(c.d);setProjectsReady(true);setProjectsFromCache(true);}
-    }catch{}
+    setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;
+    // persistentLocalCache (IndexedDB) fires immediately with cached data,
+    // then fires again with fromCache=false once the server responds.
     const unsub=listenProjects(
       user.uid,
       (ps,fromCache)=>{
         setProjects(ps);setProjectsReady(true);setProjectsError(null);
         setProjectsFromCache(fromCache);projectsReadyRef.current=true;
-        // Persist to localStorage whenever we get live server data
-        if(!fromCache){try{localStorage.setItem(`ap_p_${user.uid}`,JSON.stringify({d:ps,t:Date.now()}))}catch{}}
       },
       (err)=>{setProjectsError(err.code||err.message);}
     );
-    // If no data at all after 15s (fresh device, no localStorage, slow network), force reconnect
+    // If no IndexedDB cache and server hasn't responded in 15s, force reconnect
     const syncTimer=setTimeout(()=>{ if(!projectsReadyRef.current) forceFirestoreSync(); },15000);
     return ()=>{ unsub(); clearTimeout(syncTimer); projectsReadyRef.current=false; };
   },[user]);
