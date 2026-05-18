@@ -12,7 +12,8 @@ import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
 import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail } from './lib/emailService.js'
-import { forceFirestoreSync } from './lib/firebase.js'
+import { forceFirestoreSync, db } from './lib/firebase.js'
+import { getDoc, doc } from 'firebase/firestore'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
 const DARK = {
@@ -1907,6 +1908,22 @@ export default function App(){
     return()=>{window.removeEventListener('online',onOnline);window.removeEventListener('offline',onOffline);};
   },[])
 
+  // Firestore server connectivity probe — runs once after login
+  const [fsProbeResult, setFsProbeResult] = useState(null) // null | 'ok' | string(error)
+  useEffect(()=>{
+    if(!user) return;
+    setFsProbeResult(null);
+    const probe = async () => {
+      try {
+        await getDoc(doc(db, 'settings', 'accessControl'))
+        setFsProbeResult('ok')
+      } catch(e) {
+        setFsProbeResult(e.code || e.message || 'unknown-error')
+      }
+    }
+    probe()
+  },[user])
+
   useEffect(()=>{
     const onVisible=()=>{ if(document.visibilityState==='visible') forceFirestoreSync() }
     document.addEventListener('visibilitychange',onVisible)
@@ -2682,6 +2699,14 @@ export default function App(){
             </span>
             {user&&<span style={{fontSize:9,color:T.textDim,fontFamily:'monospace',marginLeft:2}}>({user.email?.split('@')[0]})</span>}
           </div>
+          {fsProbeResult&&fsProbeResult!=='ok'&&(
+            <>
+              <div style={{height:10,width:1,background:T.border}}/>
+              <span style={{fontSize:10,fontWeight:600,color:T.red}} title="Eroare conectare Firebase — vezi detalii">
+                ⚠ Firebase: {fsProbeResult}
+              </span>
+            </>
+          )}
           <div style={{height:10,width:1,background:T.border}}/>
           <span style={{fontSize:10,color:T.textDim,fontFamily:'monospace'}}>v{__BUILD_DATE__}</span>
           <a href="https://www.studiokolectiv.ro" target="_blank" rel="noreferrer" style={{fontSize:10,color:T.blue,textDecoration:"none",fontWeight:500}}>studiokolectiv.ro</a>
