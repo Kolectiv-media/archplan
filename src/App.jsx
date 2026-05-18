@@ -10,9 +10,8 @@ import {
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, getSharedProject, listenNotes, createNote, deleteNote } from './lib/db.js'
+import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail } from './lib/emailService.js'
-import { forceFirestoreSync } from './lib/firebase.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
 const DARK = {
@@ -1783,36 +1782,15 @@ export default function App(){
 
   const [projectsReady,setProjectsReady]=useState(false);
   const [projectsError,setProjectsError]=useState(null);
-  const unsubProjectsRef=useRef(null);
   useEffect(()=>{
     if(!user){setProjectsReady(false);setProjectsError(null);return;}
-
-    const subscribe=()=>{
-      unsubProjectsRef.current?.();
-      setProjectsReady(false);setProjectsError(null);
-      unsubProjectsRef.current=listenProjects(
-        user.uid,
-        (ps)=>{setProjects(ps);setProjectsReady(true);setProjectsError(null);},
-        (err)=>{setProjectsError(err.code||err.message);showToast(`Firestore: ${err.code}`,T.red);}
-      );
-    };
-
-    subscribe();
-
-    // When the tab returns to foreground after being backgrounded/suspended,
-    // mobile browsers can drop the long-poll connection silently. Force
-    // Firestore to reconnect so all listeners catch up immediately.
-    const onVisible=()=>{
-      if(document.visibilityState==='visible'){
-        forceFirestoreSync().then(subscribe);
-      }
-    };
-    document.addEventListener('visibilitychange',onVisible);
-
-    return()=>{
-      unsubProjectsRef.current?.();
-      document.removeEventListener('visibilitychange',onVisible);
-    };
+    setProjectsReady(false);setProjectsError(null);
+    const unsub=listenProjects(
+      user.uid,
+      (ps)=>{setProjects(ps);setProjectsReady(true);setProjectsError(null);},
+      (err)=>{setProjectsError(err.code||err.message);}
+    );
+    return unsub;
   },[user]);
 
   useEffect(()=>{
