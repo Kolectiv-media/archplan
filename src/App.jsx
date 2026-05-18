@@ -117,10 +117,12 @@ const makeMsgs = (channel) => {
 
 /* ─── HELPERS ────────────────────────────────────────────────────────────────── */
 const uid   = () => Math.random().toString(36).slice(2,8);
-const TODAY = new Date().toISOString().slice(0,10);
+// Local timezone date string (YYYY-MM-DD) — avoids UTC offset issues (e.g. Romania UTC+2/+3)
+const localDate = (d=new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const TODAY = localDate();
 const diffD = (a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
-const fmt   = d=>d?new Date(d).toLocaleDateString("ro-RO",{day:"2-digit",month:"short",year:"numeric"}):"—";
-const fmtS  = d=>d?new Date(d).toLocaleDateString("ro-RO",{day:"2-digit",month:"short"}):"—";
+const fmt   = d=>d?new Date(d+'T12:00:00').toLocaleDateString("ro-RO",{day:"2-digit",month:"short",year:"numeric"}):"—";
+const fmtS  = d=>d?new Date(d+'T12:00:00').toLocaleDateString("ro-RO",{day:"2-digit",month:"short"}):"—";
 const fmtT  = d=>d instanceof Date?d.toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"}):"—";
 const pctOf = phases=>phases.length?Math.round(phases.filter(p=>p.status==="approved").length/phases.length*100):0;
 
@@ -128,55 +130,79 @@ const avatarColor = (str="")=>AVATAR_COLORS[str.split("").reduce((a,c)=>a+c.char
 
 /* ─── PHASE CHAIN + CASCADE ──────────────────────────────────────────────────── */
 const PHASE_CHAIN=[
-  {phaseId:'ph_cu_doc', dur:14},
-  {phaseId:'ph_cu_dep', dur:3},
-  {phaseId:'ph_cu_emit',dur:30},
-  {phaseId:'ph_av_doc', dur:21},
-  {phaseId:'ph_av_dep', dur:7},
-  {phaseId:'ph_av_obt', dur:45},
-  {phaseId:'ph_pt_doc', dur:30},
-  {phaseId:'ph_pt_ver', dur:14},
-  {phaseId:'ph_ac_dep', dur:5},
-  {phaseId:'ph_ac_emit',dur:30},
+  {phaseId:'ph_cu_doc', dur:14, workDays:false},
+  {phaseId:'ph_cu_dep', dur:3,  workDays:false},
+  {phaseId:'ph_cu_emit',dur:30, workDays:false},
+  {phaseId:'ph_av_doc', dur:21, workDays:false},
+  {phaseId:'ph_av_dep', dur:5,  workDays:true},  // 5 zile lucrătoare
+  {phaseId:'ph_av_obt', dur:30, workDays:true},  // 30 zile lucrătoare de la ultima depunere
+  {phaseId:'ph_pt_doc', dur:7,  workDays:true},  // 7 zile lucrătoare după avize
+  {phaseId:'ph_pt_ver', dur:7,  workDays:true},  // 7 zile lucrătoare
+  {phaseId:'ph_ac_dep', dur:3,  workDays:true},  // 3 zile lucrătoare
+  {phaseId:'ph_ac_emit',dur:30, workDays:true},  // 30 zile lucrătoare
 ];
 
 const addDays=(dateStr,n)=>{
-  const d=new Date(dateStr);
+  const d=new Date(dateStr+'T12:00:00');
   d.setDate(d.getDate()+n);
-  return d.toISOString().slice(0,10);
+  return localDate(d);
 };
 
+// Adds n working days (Mon–Fri) to a date string
+const addWorkDays=(dateStr,n)=>{
+  if(!dateStr) return dateStr;
+  const d=new Date(dateStr+'T12:00:00');
+  let added=0;
+  while(added<n){
+    d.setDate(d.getDate()+1);
+    if(d.getDay()!==0&&d.getDay()!==6) added++;
+  }
+  return localDate(d);
+};
+
+const advanceDate=(dateStr,dur,workDays)=>workDays?addWorkDays(dateStr,dur):addDays(dateStr,dur);
+
 // Cascade startDate/endDate forward from fromPhId through the chain.
-// avize-driven phases (ph_av_dep, ph_av_obt) are overridden by real avize dates when present.
+// ph_av_dep: ends 5 working days after the latest aviz submission date.
+// ph_av_obt: ends 30 working days after the latest aviz submission date.
+// All phases from ph_pt_doc onwards use working days.
 const cascadeForward=(phases,fromPhId,fromEndDate,avize=[])=>{
   const chainIdx=PHASE_CHAIN.findIndex(p=>p.phaseId===fromPhId);
   if(chainIdx<0||chainIdx>=PHASE_CHAIN.length-1||!fromEndDate) return phases;
 
   const subs=avize.filter(av=>av.submissionDate).map(av=>av.submissionDate).sort();
+  const latestSub=subs.length>0?subs[subs.length-1]:null;
   const emOrEst=avize.filter(av=>av.emissionDate||av.estimatedDate)
                      .map(av=>av.emissionDate||av.estimatedDate).sort();
+  const latestEm=emOrEst.length>0?emOrEst[emOrEst.length-1]:null;
 
   let prevEnd=fromEndDate;
   const result=[...phases];
 
   for(let i=chainIdx+1;i<PHASE_CHAIN.length;i++){
-    const {phaseId,dur}=PHASE_CHAIN[i];
+    const {phaseId,dur,workDays}=PHASE_CHAIN[i];
     const idx=result.findIndex(p=>p.phaseId===phaseId);
     if(idx<0) continue;
 
-    if(phaseId==='ph_av_dep'&&subs.length>0){
-      result[idx]={...result[idx],startDate:subs[0],endDate:subs[subs.length-1]};
-      prevEnd=subs[subs.length-1];
+    if(phaseId==='ph_av_dep'){
+      // End = latest submission date + 5 work days (or prev + 5 if no subs yet)
+      const base=latestSub||prevEnd;
+      const end=addWorkDays(base,5);
+      result[idx]={...result[idx],startDate:latestSub?subs[0]:prevEnd,endDate:end};
+      prevEnd=end;
       continue;
     }
-    if(phaseId==='ph_av_obt'&&emOrEst.length>0){
+    if(phaseId==='ph_av_obt'){
+      // End = latest submission + 30 work days; use actual emission date if available
+      const estEnd=latestSub?addWorkDays(latestSub,30):addWorkDays(prevEnd,30);
+      const end=latestEm||estEnd;
       const allDone=avize.every(av=>av.emissionDate||av.status==='approved'||av.status==='picked_up'||av.status==='ready');
-      result[idx]={...result[idx],startDate:emOrEst[0],endDate:emOrEst[emOrEst.length-1],...(allDone?{status:'approved'}:{})};
-      prevEnd=emOrEst[emOrEst.length-1];
+      result[idx]={...result[idx],startDate:prevEnd,endDate:end,...(allDone?{status:'approved'}:{})};
+      prevEnd=end;
       continue;
     }
 
-    const newEnd=addDays(prevEnd,dur);
+    const newEnd=advanceDate(prevEnd,dur,workDays);
     result[idx]={...result[idx],startDate:prevEnd,endDate:newEnd};
     prevEnd=newEnd;
   }
@@ -186,22 +212,23 @@ const cascadeForward=(phases,fromPhId,fromEndDate,avize=[])=>{
 /* ─── DEMO PROJECTS ──────────────────────────────────────────────────────────── */
 const mkPhases=(start,statuses)=>{
   const tpl=[
-    {id:"cu_doc",  name:"Elaborare documentație CU",   group:"CU",   dur:14},
-    {id:"cu_dep",  name:"Depunere cerere CU",          group:"CU",   dur:3},
-    {id:"cu_emit", name:"Emitere CU",                  group:"CU",   dur:30},
-    {id:"av_doc",  name:"Elaborare documentații avize",group:"Avize",dur:21},
-    {id:"av_dep",  name:"Depunere avize instituții",   group:"Avize",dur:7},
-    {id:"av_obt",  name:"Obținere avize",              group:"Avize",dur:45},
-    {id:"pt_doc",  name:"Elaborare PT",                group:"PT",   dur:30},
-    {id:"pt_ver",  name:"Verificare proiect",          group:"PT",   dur:14},
-    {id:"ac_dep",  name:"Depunere dosar AC",           group:"AC",   dur:5},
-    {id:"ac_emit", name:"Emitere AC",                  group:"AC",   dur:30},
+    {id:"cu_doc",  name:"Elaborare documentație CU",   group:"CU",   dur:14, w:false},
+    {id:"cu_dep",  name:"Depunere cerere CU",          group:"CU",   dur:3,  w:false},
+    {id:"cu_emit", name:"Emitere CU",                  group:"CU",   dur:30, w:false},
+    {id:"av_doc",  name:"Elaborare documentații avize",group:"Avize",dur:21, w:false},
+    {id:"av_dep",  name:"Depunere avize instituții",   group:"Avize",dur:5,  w:true},
+    {id:"av_obt",  name:"Obținere avize",              group:"Avize",dur:30, w:true},
+    {id:"pt_doc",  name:"Elaborare PT",                group:"PT",   dur:7,  w:true},
+    {id:"pt_ver",  name:"Verificare proiect",          group:"PT",   dur:7,  w:true},
+    {id:"ac_dep",  name:"Depunere dosar AC",           group:"AC",   dur:3,  w:true},
+    {id:"ac_emit", name:"Emitere AC",                  group:"AC",   dur:30, w:true},
   ];
-  let cur=new Date(start);
+  let cur=start;
   return tpl.map((t,i)=>{
-    const s=cur.toISOString().slice(0,10);
-    cur=new Date(cur.getTime()+t.dur*86400000);
-    return{...t,phaseId:`ph_${t.id}`,status:statuses[i]||"pending",startDate:s,endDate:cur.toISOString().slice(0,10),attachments:[],dependsOn:i>0?`ph_${tpl[i-1].id}`:null};
+    const s=cur;
+    const e=advanceDate(cur,t.dur,t.w);
+    cur=e;
+    return{...t,phaseId:`ph_${t.id}`,status:statuses[i]||"pending",startDate:s,endDate:e,attachments:[],dependsOn:i>0?`ph_${tpl[i-1].id}`:null};
   });
 };
 const mkAvize=(start,sts={})=>INST.map(inst=>({
@@ -1794,17 +1821,24 @@ export default function App(){
   const projectsReadyRef=useRef(false);
   useEffect(()=>{
     if(!user){setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;return;}
-    setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;
+    setProjectsReady(false);setProjectsError(null);projectsReadyRef.current=false;
+    // Show localStorage cache instantly while Firestore connects
+    try{
+      const c=JSON.parse(localStorage.getItem(`ap_p_${user.uid}`)||'null');
+      if(c?.d?.length){setProjects(c.d);setProjectsReady(true);setProjectsFromCache(true);}
+    }catch{}
     const unsub=listenProjects(
       user.uid,
       (ps,fromCache)=>{
         setProjects(ps);setProjectsReady(true);setProjectsError(null);
         setProjectsFromCache(fromCache);projectsReadyRef.current=true;
+        // Persist to localStorage whenever we get live server data
+        if(!fromCache){try{localStorage.setItem(`ap_p_${user.uid}`,JSON.stringify({d:ps,t:Date.now()}))}catch{}}
       },
       (err)=>{setProjectsError(err.code||err.message);}
     );
-    // If no data within 12s (fresh device, slow long-poll), force reconnect
-    const syncTimer=setTimeout(()=>{ if(!projectsReadyRef.current) forceFirestoreSync(); },12000);
+    // If no data at all after 15s (fresh device, no localStorage, slow network), force reconnect
+    const syncTimer=setTimeout(()=>{ if(!projectsReadyRef.current) forceFirestoreSync(); },15000);
     return ()=>{ unsub(); clearTimeout(syncTimer); projectsReadyRef.current=false; };
   },[user]);
 

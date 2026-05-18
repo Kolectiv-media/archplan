@@ -2,8 +2,7 @@ import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import {
   initializeFirestore,
-  persistentLocalCache,
-  persistentSingleTabManager,
+  memoryLocalCache,
   enableNetwork,
   disableNetwork,
 } from 'firebase/firestore'
@@ -22,11 +21,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 
+// memoryLocalCache: no IndexedDB complications; projects are cached in localStorage
+// by App.jsx for instant display on refresh.
+// experimentalAutoDetectLongPolling: tries WebSocket first, falls back to HTTP
+// long-poll automatically — works on all networks including restrictive mobile.
 export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  localCache: persistentLocalCache({
-    tabManager: persistentSingleTabManager(),
-  }),
+  experimentalAutoDetectLongPolling: true,
+  localCache: memoryLocalCache(),
 })
 
 export const storage = getStorage(app)
