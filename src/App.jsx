@@ -57,6 +57,7 @@ const STATUS_META = {
   rejected:   {label:"Respins",    Icon:AlertCircle, color:"#f85149"},
 };
 const AVIZ_STATUSES=[
+  {id:'pending',    label:'De obținut',      color:'#484f58'},
   {id:'in_progress',label:'În lucru',        color:'#58a6ff'},
   {id:'blocked',    label:'Blocat',          color:'#f85149'},
   {id:'ready',      label:'Se poate ridica', color:'#d29922'},
@@ -1533,8 +1534,10 @@ const AvizeDashboard = ({projects, T, onNavigate}) => {
   )
 
   const filtered = allAvize.filter(av=>{
-    if(statusF==='wip' && (av.status==='approved'||av.status==='picked_up')) return false
-    else if(statusF!=='all' && statusF!=='wip' && av.status!==statusF) return false
+    const avSt = av.status||'pending'
+    if(statusF==='wip' && (avSt==='approved'||avSt==='picked_up')) return false
+    else if(statusF==='pending' && avSt!=='pending') return false
+    else if(statusF!=='all' && statusF!=='wip' && statusF!=='pending' && avSt!==statusF) return false
     if(validityF!=='all') {
       const dl = av.expiryDate ? Math.round((new Date(av.expiryDate)-new Date())/86400000) : null
       if(validityF==='expiring' && !(dl!==null&&dl>=0&&dl<=30)) return false
@@ -1572,7 +1575,11 @@ const AvizeDashboard = ({projects, T, onNavigate}) => {
           <select value={statusF} onChange={e=>setStatusF(e.target.value)}
             style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,padding:'4px 10px',color:T.textMd,fontSize:11,outline:'none',fontFamily:'inherit',cursor:'pointer'}}>
             <option value="all">Toate statusurile</option>
+            <option value="pending">De obținut</option>
             <option value="wip">WIP (neconfirmate)</option>
+            <option value="in_progress">În lucru</option>
+            <option value="blocked">Blocat</option>
+            <option value="ready">Se poate ridica</option>
             <option value="approved">Obținut</option>
             <option value="picked_up">Ridicat</option>
           </select>
@@ -2235,10 +2242,7 @@ export default function App(){
               {coll?<PanelLeftOpen size={15}/>:<PanelLeftClose size={15}/>}
             </button>
           </div>
-          {!coll&&<div style={{padding:"8px 14px 2px",fontSize:9,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:1,display:'flex',alignItems:'center',gap:6}}>
-            Proiecte ({filt.length})
-            {projectsReady&&projectsFromCache&&<span style={{fontSize:8,color:T.amber,display:'flex',alignItems:'center',gap:3}}><span style={{width:5,height:5,borderRadius:'50%',background:T.amber,animation:'pulse 1.5s ease infinite',display:'inline-block'}}/>sync</span>}
-          </div>}
+          {!coll&&<div style={{padding:"8px 14px 2px",fontSize:9,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:1}}>Proiecte ({filt.length})</div>}
           <div style={{overflowY:"auto",flex:1,paddingBottom:8}}>
             {!projectsReady&&!projectsError&&user&&(
               <div style={{padding:'20px 14px',textAlign:'center'}}>
@@ -2588,10 +2592,13 @@ export default function App(){
         <span style={{fontSize:10,color:T.textDim}}>Arhitectură · Urbanism · Design</span>
         <div style={{marginLeft:"auto",display:"flex",gap:14,alignItems:"center"}}>
           {/* Firestore sync indicator */}
-          <div style={{display:'flex',alignItems:'center',gap:4}}>
-            <div style={{width:6,height:6,borderRadius:'50%',background:fsOnline?T.green:T.red,flexShrink:0}}/>
-            <span style={{fontSize:10,color:fsOnline?T.green:T.red,fontWeight:600}}>
-              {fsOnline?'Sincronizat':'Offline'}
+          <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}} onClick={()=>forceFirestoreSync()} title="Click pentru a forța sincronizarea">
+            <div style={{width:6,height:6,borderRadius:'50%',flexShrink:0,
+              background:!fsOnline?T.red:projectsReady&&!projectsFromCache?T.green:T.amber,
+              animation:projectsReady&&projectsFromCache?'pulse 1.5s ease infinite':undefined}}/>
+            <span style={{fontSize:10,fontWeight:600,
+              color:!fsOnline?T.red:projectsReady&&!projectsFromCache?T.green:T.amber}}>
+              {!fsOnline?'Offline':projectsReady&&!projectsFromCache?'Sincronizat':'Sincronizare…'}
             </span>
           </div>
           <div style={{height:10,width:1,background:T.border}}/>

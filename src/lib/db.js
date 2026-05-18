@@ -11,6 +11,7 @@ export const projectsCol = (uid) => collection(db, 'users', uid, 'projects')
 export const listenProjects = (uid, cb, onErr) =>
   onSnapshot(
     collection(db, 'users', uid, 'projects'),
+    { includeMetadataChanges: true },
     snap => cb(
       snap.docs.map(d => ({ id: d.id, ...d.data() }))
                .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0)),
