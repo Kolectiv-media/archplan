@@ -2,6 +2,8 @@ import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import {
   initializeFirestore,
+  persistentLocalCache,
+  persistentSingleTabManager,
   memoryLocalCache,
   enableNetwork,
   disableNetwork,
@@ -21,14 +23,19 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 
-// memoryLocalCache: no IndexedDB — eliminates all schema/lock conflicts that
-// caused the server connection to never be established.
-// Projects are persisted in localStorage by App.jsx for instant refresh.
-// experimentalAutoDetectLongPolling: WebSocket-first with automatic fallback
-// to HTTP long-poll — works on restrictive mobile networks.
+// persistentLocalCache: writes survive refresh even when offline (IndexedDB).
+// Falls back to memoryLocalCache if IndexedDB is unavailable (private browsing).
+// experimentalAutoDetectLongPolling: WebSocket-first, auto HTTP long-poll fallback.
+let localCache
+try {
+  localCache = persistentLocalCache({ tabManager: persistentSingleTabManager() })
+} catch {
+  localCache = memoryLocalCache()
+}
+
 export const db = initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true,
-  localCache: memoryLocalCache(),
+  localCache,
 })
 
 export const storage = getStorage(app)
