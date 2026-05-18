@@ -1,6 +1,12 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
-import { initializeFirestore, memoryLocalCache } from 'firebase/firestore'
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  enableNetwork,
+  disableNetwork,
+} from 'firebase/firestore'
 import { getStorage } from 'firebase/storage'
 
 const firebaseConfig = {
@@ -18,7 +24,9 @@ export const auth = getAuth(app)
 
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-  localCache: memoryLocalCache(),
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
 })
 
 export const storage = getStorage(app)
@@ -27,4 +35,11 @@ export const messaging = null
 export async function requestPushPermission() { return null }
 export function onPushMessage() { return () => {} }
 
-export async function forceFirestoreSync() {}
+export async function forceFirestoreSync() {
+  try {
+    await disableNetwork(db)
+    await enableNetwork(db)
+  } catch (e) {
+    console.warn('forceFirestoreSync:', e)
+  }
+}

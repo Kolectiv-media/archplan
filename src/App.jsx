@@ -12,6 +12,7 @@ import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
 import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail } from './lib/emailService.js'
+import { forceFirestoreSync } from './lib/firebase.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
 const DARK = {
@@ -1818,6 +1819,12 @@ export default function App(){
     window.addEventListener('offline',onOffline);
     setFsOnline(navigator.onLine);
     return()=>{window.removeEventListener('online',onOnline);window.removeEventListener('offline',onOffline);};
+  },[])
+
+  useEffect(()=>{
+    const onVisible=()=>{ if(document.visibilityState==='visible') forceFirestoreSync() }
+    document.addEventListener('visibilitychange',onVisible)
+    return()=>document.removeEventListener('visibilitychange',onVisible)
   },[])
 
   useEffect(()=>{
