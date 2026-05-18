@@ -1,4 +1,3 @@
-// src/hooks/useAuth.js
 import React from 'react'
 import { createContext, useContext, useState, useEffect } from 'react'
 import {
@@ -16,19 +15,16 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u)
+      setLoading(false)
       if (u) {
-        try {
-          const prof = await getUserProfile(u.uid)
-          setProfile(prof)
-        } catch {
-          setProfile({})
-        }
+        getUserProfile(u.uid)
+          .then(prof => setProfile(prof))
+          .catch(() => setProfile({}))
       } else {
         setProfile({})
       }
-      setLoading(false)
     })
     return unsub
   }, [])

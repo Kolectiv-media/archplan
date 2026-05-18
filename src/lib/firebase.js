@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import {
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
   enableNetwork,
   disableNetwork,
 } from 'firebase/firestore'
@@ -25,7 +25,7 @@ export const auth = getAuth(app)
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
+    tabManager: persistentSingleTabManager(),
   }),
 })
 
