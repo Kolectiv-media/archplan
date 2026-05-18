@@ -135,6 +135,18 @@ const pctOf = phases=>phases.length?Math.round(phases.filter(p=>p.status==="appr
 
 const avatarColor = (str="")=>AVATAR_COLORS[str.split("").reduce((a,c)=>a+c.charCodeAt(0),0)%AVATAR_COLORS.length];
 
+/* ─── LOCAL PROJECT CACHE (localStorage) ─────────────────────────────────────
+   Belt-and-suspenders safety: projects are always saved to localStorage on
+   every change so they survive page refresh even when Firestore is slow or
+   temporarily unreachable.  Keyed by UID so different users never mix data. */
+const projCacheKey = uid => `ap_proj_v2_${uid}`;
+const saveProjectCache = (uid, projs) => {
+  try { localStorage.setItem(projCacheKey(uid), JSON.stringify(projs)); } catch {}
+};
+const loadProjectCache = uid => {
+  try { return JSON.parse(localStorage.getItem(projCacheKey(uid)) || 'null') || []; } catch { return []; }
+};
+
 /* ─── PHASE CHAIN + CASCADE ──────────────────────────────────────────────────── */
 const PHASE_CHAIN=[
   {phaseId:'ph_cu_doc', dur:14, workDays:false},
@@ -1827,22 +1839,41 @@ export default function App(){
   const [projectsFromCache,setProjectsFromCache]=useState(false);
   const projectsReadyRef=useRef(false);
   useEffect(()=>{
-    if(!user){setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;return;}
-    setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;
-    // persistentLocalCache (IndexedDB) fires immediately with cached data,
-    // then fires again with fromCache=false once the server responds.
+    if(!user){
+      setProjects([]);setProjectsReady(false);setProjectsError(null);
+      setProjectsFromCache(false);projectsReadyRef.current=false;
+      return;
+    }
+    // 1. Show localStorage cache instantly — projects appear before network
+    const cached=loadProjectCache(user.uid);
+    if(cached.length){
+      setProjects(cached);setProjectsReady(true);setProjectsFromCache(true);
+    } else {
+      setProjectsReady(false);setProjectsError(null);
+      setProjectsFromCache(false);projectsReadyRef.current=false;
+    }
+    // 2. Firestore real-time listener — overwrites cache with live server data
     const unsub=listenProjects(
       user.uid,
       (ps,fromCache)=>{
         setProjects(ps);setProjectsReady(true);setProjectsError(null);
         setProjectsFromCache(fromCache);projectsReadyRef.current=true;
+        // Persist server-confirmed data so next refresh is instant
+        if(!fromCache) saveProjectCache(user.uid,ps);
       },
       (err)=>{setProjectsError(err.code||err.message);}
     );
-    // If no IndexedDB cache and server hasn't responded in 15s, force reconnect
+    // 3. Force reconnect after 15s if Firestore still hasn't responded
     const syncTimer=setTimeout(()=>{ if(!projectsReadyRef.current) forceFirestoreSync(); },15000);
     return ()=>{ unsub(); clearTimeout(syncTimer); projectsReadyRef.current=false; };
   },[user]);
+
+  // Auto-save to localStorage on every project change (covers all mutations)
+  const userUid=user?.uid;
+  useEffect(()=>{
+    if(!userUid||!projects.length) return;
+    saveProjectCache(userUid,projects);
+  },[projects,userUid]);
 
   useEffect(()=>{
     if(!user) return;

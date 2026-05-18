@@ -2,8 +2,7 @@ import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import {
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
   enableNetwork,
   disableNetwork,
 } from 'firebase/firestore'
@@ -22,17 +21,14 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 
-// persistentLocalCache: data survives page refresh via IndexedDB — projects
-// never disappear on reload. persistentMultipleTabManager: each tab/device
-// maintains its own live Firestore connection for real-time cross-device sync.
-// experimentalAutoDetectLongPolling: tries WebSocket first, falls back to
-// HTTP long-poll automatically — avoids the force-longpoll bug that prevented
-// the server connection from ever being established.
+// memoryLocalCache: no IndexedDB — eliminates all schema/lock conflicts that
+// caused the server connection to never be established.
+// Projects are persisted in localStorage by App.jsx for instant refresh.
+// experimentalAutoDetectLongPolling: WebSocket-first with automatic fallback
+// to HTTP long-poll — works on restrictive mobile networks.
 export const db = initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true,
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
-  }),
+  localCache: memoryLocalCache(),
 })
 
 export const storage = getStorage(app)
