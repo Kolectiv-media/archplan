@@ -10,10 +10,11 @@ export const projectsCol = (uid) => collection(db, 'users', uid, 'projects')
 
 export const listenProjects = (uid, cb, onErr) =>
   onSnapshot(
-    collection(db, 'users', uid, 'projects'),  // no orderBy — avoids index requirement
-    snap => cb(snap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0))
+    collection(db, 'users', uid, 'projects'),
+    snap => cb(
+      snap.docs.map(d => ({ id: d.id, ...d.data() }))
+               .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0)),
+      snap.metadata.fromCache
     ),
     err => { console.error('listenProjects:', err.code, err.message); onErr?.(err); }
   )

@@ -1121,7 +1121,7 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
                       <input type="date" value={av.submissionDate||''} onChange={e=>{
                         const sd=e.target.value
                         const updates={submissionDate:sd}
-                        if(sd&&!av.estimatedDate){const d=new Date(sd);d.setDate(d.getDate()+30);updates.estimatedDate=d.toISOString().slice(0,10)}
+                        if(sd){const d=new Date(sd);d.setDate(d.getDate()+30);updates.estimatedDate=d.toISOString().slice(0,10)}
                         onUpdate(av.avizId,updates)
                       }} style={{width:'100%',background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:6,padding:'5px 8px',color:T.text,fontSize:11,outline:'none',fontFamily:'inherit',boxSizing:'border-box'}}/>
                     </div>
@@ -1783,15 +1783,22 @@ export default function App(){
 
   const [projectsReady,setProjectsReady]=useState(false);
   const [projectsError,setProjectsError]=useState(null);
+  const [projectsFromCache,setProjectsFromCache]=useState(false);
+  const projectsReadyRef=useRef(false);
   useEffect(()=>{
-    if(!user){setProjectsReady(false);setProjectsError(null);return;}
-    setProjectsReady(false);setProjectsError(null);
+    if(!user){setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;return;}
+    setProjectsReady(false);setProjectsError(null);setProjectsFromCache(false);projectsReadyRef.current=false;
     const unsub=listenProjects(
       user.uid,
-      (ps)=>{setProjects(ps);setProjectsReady(true);setProjectsError(null);},
+      (ps,fromCache)=>{
+        setProjects(ps);setProjectsReady(true);setProjectsError(null);
+        setProjectsFromCache(fromCache);projectsReadyRef.current=true;
+      },
       (err)=>{setProjectsError(err.code||err.message);}
     );
-    return unsub;
+    // If no data within 12s (fresh device, slow long-poll), force reconnect
+    const syncTimer=setTimeout(()=>{ if(!projectsReadyRef.current) forceFirestoreSync(); },12000);
+    return ()=>{ unsub(); clearTimeout(syncTimer); projectsReadyRef.current=false; };
   },[user]);
 
   useEffect(()=>{
@@ -2228,7 +2235,10 @@ export default function App(){
               {coll?<PanelLeftOpen size={15}/>:<PanelLeftClose size={15}/>}
             </button>
           </div>
-          {!coll&&<div style={{padding:"8px 14px 2px",fontSize:9,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:1}}>Proiecte ({filt.length})</div>}
+          {!coll&&<div style={{padding:"8px 14px 2px",fontSize:9,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:1,display:'flex',alignItems:'center',gap:6}}>
+            Proiecte ({filt.length})
+            {projectsReady&&projectsFromCache&&<span style={{fontSize:8,color:T.amber,display:'flex',alignItems:'center',gap:3}}><span style={{width:5,height:5,borderRadius:'50%',background:T.amber,animation:'pulse 1.5s ease infinite',display:'inline-block'}}/>sync</span>}
+          </div>}
           <div style={{overflowY:"auto",flex:1,paddingBottom:8}}>
             {!projectsReady&&!projectsError&&user&&(
               <div style={{padding:'20px 14px',textAlign:'center'}}>
