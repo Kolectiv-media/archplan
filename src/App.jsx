@@ -1856,12 +1856,26 @@ export default function App(){
       setProjectsFromCache(false);projectsReadyRef.current=false;
     }
     // 2. Firestore real-time listener — overwrites cache with live server data
+    const hasMigrated = { current: false }
     const unsub=listenProjects(
       user.uid,
       (ps,fromCache)=>{
-        // Never wipe localStorage-loaded projects with an empty in-memory snapshot.
-        // fromCache+empty = Firestore SDK initial state before server responds; ignore it.
+        // Ignore initial empty memory-cache snapshot before server responds
         if(fromCache && ps.length===0) return;
+
+        // Server confirmed empty but we have local projects → migrate them up to Firebase
+        if(!fromCache && ps.length===0 && !hasMigrated.current) {
+          const cached = loadProjectCache(user.uid);
+          if(cached.length > 0) {
+            hasMigrated.current = true;
+            cached.forEach(({ id: _id, createdAt: _ca, updatedAt: _ua, ...data }) => {
+              createProject(user.uid, data).catch(e => console.error('migrate project:', e));
+            });
+            // Don't update state — wait for listener to fire again with uploaded data
+            return;
+          }
+        }
+
         setProjects(ps);setProjectsReady(true);setProjectsError(null);
         setProjectsFromCache(fromCache);projectsReadyRef.current=true;projectsFromCacheRef.current=fromCache;
         if(!fromCache){ saveProjectCache(user.uid,ps);setLastSyncTime(new Date()); }
