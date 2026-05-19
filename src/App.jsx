@@ -1856,18 +1856,18 @@ export default function App(){
       setProjectsFromCache(false);projectsReadyRef.current=false;
     }
     // 2. Firestore real-time listener — overwrites cache with live server data
-    const hasMigrated = { current: false }
+    const migrationState = { tried: false, failed: false }
     const unsub=listenProjects(
       user.uid,
       async (ps,fromCache)=>{
-        // Ignore initial empty memory-cache snapshot before server responds
+        // Ignore initial empty cache snapshot (IndexedDB or memory) before server responds
         if(fromCache && ps.length===0) return;
 
-        // Server confirmed empty but we have local projects → migrate them up to Firebase
-        if(!fromCache && ps.length===0 && !hasMigrated.current) {
+        // Server confirmed empty but localStorage has projects → migrate them up
+        if(!fromCache && ps.length===0 && !migrationState.tried) {
           const cached = loadProjectCache(user.uid);
           if(cached.length > 0) {
-            hasMigrated.current = true;
+            migrationState.tried = true;
             showToast(`Se urcă ${cached.length} proiect(e) pe server…`, T.amber);
             try {
               await Promise.all(
@@ -1877,13 +1877,17 @@ export default function App(){
               );
               showToast(`${cached.length} proiect(e) sincronizate ✓`, T.green);
             } catch(e) {
+              migrationState.failed = true;
               showToast(`Eroare sincronizare: ${e.code||e.message}`, T.red);
-              // Still continue — show what we have locally
               setProjects(cached);setProjectsReady(true);setProjectsFromCache(true);
             }
             return;
           }
         }
+
+        // Never wipe display with empty server response if migration failed or
+        // if we still have localStorage data (guard against transient empty snapshots)
+        if(ps.length===0 && (migrationState.failed || loadProjectCache(user.uid).length > 0)) return;
 
         setProjects(ps);setProjectsReady(true);setProjectsError(null);
         setProjectsFromCache(fromCache);projectsReadyRef.current=true;projectsFromCacheRef.current=fromCache;

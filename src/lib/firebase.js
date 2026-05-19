@@ -1,7 +1,10 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import {
-  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentSingleTabManager,
+  memoryLocalCache,
   enableNetwork,
   disableNetwork,
 } from 'firebase/firestore'
@@ -20,9 +23,18 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 
-// Minimal init — no experimental options, no custom cache
-// Testing if the connection issue is in our config or in Firebase project setup
-export const db = getFirestore(app)
+// persistentLocalCache: reads from IndexedDB on startup, syncs pending writes
+// to server when connection is available. NO experimentalAutoDetectLongPolling
+// (that option was causing the 'unavailable' error). Falls back to memory cache
+// if IndexedDB unavailable (private browsing mode).
+let localCache
+try {
+  localCache = persistentLocalCache({ tabManager: persistentSingleTabManager() })
+} catch {
+  localCache = memoryLocalCache()
+}
+
+export const db = initializeFirestore(app, { localCache })
 
 export const storage = getStorage(app)
 export const googleProvider = new GoogleAuthProvider()
