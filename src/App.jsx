@@ -1859,7 +1859,7 @@ export default function App(){
     const hasMigrated = { current: false }
     const unsub=listenProjects(
       user.uid,
-      (ps,fromCache)=>{
+      async (ps,fromCache)=>{
         // Ignore initial empty memory-cache snapshot before server responds
         if(fromCache && ps.length===0) return;
 
@@ -1868,10 +1868,19 @@ export default function App(){
           const cached = loadProjectCache(user.uid);
           if(cached.length > 0) {
             hasMigrated.current = true;
-            cached.forEach(({ id: _id, createdAt: _ca, updatedAt: _ua, ...data }) => {
-              createProject(user.uid, data).catch(e => console.error('migrate project:', e));
-            });
-            // Don't update state — wait for listener to fire again with uploaded data
+            showToast(`Se urcă ${cached.length} proiect(e) pe server…`, T.amber);
+            try {
+              await Promise.all(
+                cached.map(({ id: _id, createdAt: _ca, updatedAt: _ua, ...data }) =>
+                  createProject(user.uid, data)
+                )
+              );
+              showToast(`${cached.length} proiect(e) sincronizate ✓`, T.green);
+            } catch(e) {
+              showToast(`Eroare sincronizare: ${e.code||e.message}`, T.red);
+              // Still continue — show what we have locally
+              setProjects(cached);setProjectsReady(true);setProjectsFromCache(true);
+            }
             return;
           }
         }
@@ -2743,6 +2752,22 @@ export default function App(){
                   :fetchProbe==='ok'&&fsProbeResult?`⚠ Auth: ${fsProbeResult}`
                   :`⚠ ${fetchProbe||''} ${fsProbeResult||''}`}
               </span>
+            </>
+          )}
+          {user&&fetchProbe==='ok'&&fsProbeResult==='ok'&&projectsFromCache&&(
+            <>
+              <div style={{height:10,width:1,background:T.border}}/>
+              <button onClick={async()=>{
+                const cached=loadProjectCache(user.uid);
+                if(!cached.length){showToast('Nu există proiecte locale de urcat',T.amber);return;}
+                showToast(`Se urcă ${cached.length} proiect(e)…`,T.amber);
+                try{
+                  await Promise.all(cached.map(({id:_i,createdAt:_c,updatedAt:_u,...d})=>createProject(user.uid,d)));
+                  showToast(`${cached.length} proiect(e) urcate ✓`,T.green);
+                }catch(e){showToast(`Eroare: ${e.code||e.message}`,T.red);}
+              }} style={{background:'transparent',border:`1px solid ${T.amber}`,borderRadius:4,padding:'2px 8px',color:T.amber,cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:600}}>
+                ↑ Urcă local pe server
+              </button>
             </>
           )}
           <div style={{height:10,width:1,background:T.border}}/>
