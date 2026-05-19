@@ -2539,9 +2539,9 @@ export default function App(){
             })}
           </div>
           {/* Invitations banner */}
-          {!coll&&myInvitations.length>0&&(
+          {!coll&&myInvitations.filter(inv=>!inv.guestEmail||inv.guestEmail.toLowerCase()===user.email.toLowerCase()).length>0&&(
             <div style={{borderTop:`1px solid ${T.border}`,padding:'8px 10px',background:`${T.accent}10`}}>
-              {myInvitations.map(inv=>(
+              {myInvitations.filter(inv=>!inv.guestEmail||inv.guestEmail.toLowerCase()===user.email.toLowerCase()).map(inv=>(
                 <div key={inv.pid} style={{marginBottom:6,lastChild:{marginBottom:0}}}>
                   <div style={{fontSize:11,fontWeight:600,color:T.text,marginBottom:4,lineHeight:1.3}}>
                     <span style={{color:T.accent}}>Invitație:</span> {inv.projectName}
@@ -2549,6 +2549,10 @@ export default function App(){
                   </div>
                   <div style={{display:'flex',gap:5}}>
                     <button onClick={async()=>{
+                      if(inv.guestEmail && inv.guestEmail.toLowerCase()!==user.email.toLowerCase()){
+                        showToast(`Invitația e adresată lui ${inv.guestEmail}. Conectează-te cu acel cont.`,T.red);
+                        return;
+                      }
                       try{
                         await acceptInvitation(inv.ownerUid,inv.projectId||inv.pid,user.uid,user.email,user.displayName||user.email.split('@')[0]);
                         showToast(`Ai intrat în proiect: ${inv.projectName}`,T.green);
