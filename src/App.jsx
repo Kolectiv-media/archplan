@@ -10,7 +10,7 @@ import {
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote, listenConnected } from './lib/db.js'
+import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, listenCollabProjects } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail } from './lib/emailService.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
@@ -1811,6 +1811,12 @@ export default function App(){
   const [shareLoading, setShareLoading] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteTargetProj, setDeleteTargetProj] = useState(null)
+  const [collabProjects, setCollabProjects] = useState([])
+  const [myInvitations, setMyInvitations] = useState([])
+  const [projMembers, setProjMembers] = useState([])
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteLoading, setInviteLoading] = useState(false)
   const [projMenuId, setProjMenuId] = useState(null)
   const [calMonth, setCalMonth] = useState(()=>new Date())
   const [notes, setNotes] = useState([])
@@ -1925,6 +1931,28 @@ export default function App(){
   },[])
   useEffect(()=>listenConnected(setRtdbConnected),[]);
 
+  // Collaborative projects shared with this user
+  useEffect(()=>{
+    if(!user) { setCollabProjects([]); return; }
+    return listenCollabProjects(user.uid, setCollabProjects);
+  },[user]);
+
+  // Pending invitations for this user's email
+  useEffect(()=>{
+    if(!user) { setMyInvitations([]); return; }
+    return listenMyInvitations(user.email, setMyInvitations);
+  },[user]);
+
+  // Project members (owner's UID is needed for collab projects)
+  useEffect(()=>{
+    if(!selId||!user) { setProjMembers([]); return; }
+    const allP=[...projects,...collabProjects];
+    const p=allP.find(x=>x.id===selId);
+    if(!p) { setProjMembers([]); return; }
+    const ownerUid=p._isCollab?p.ownerUid:user.uid;
+    return listenProjectMembers(ownerUid, selId, setProjMembers);
+  },[selId,user,projects,collabProjects]);
+
   useEffect(()=>{
     if(!user) return;
     const timeout = setTimeout(()=>setAccessStatus('approved'), 5000)
@@ -1975,37 +2003,56 @@ export default function App(){
 
   const showToast=useCallback((msg,c)=>{setToast({msg,c:c||T.green});setTimeout(()=>setToast(null),3500);},[T]);
 
-  const sel=projects.find(p=>p.id===selId);
-  const filt=projects.filter(p=>!search||p.name.toLowerCase().includes(search.toLowerCase())||(p.client||"").toLowerCase().includes(search.toLowerCase()));
-  const alerts=projects.flatMap(p=>(p.phases||[]).filter(ph=>ph.status!=="approved"&&ph.status!=="rejected"&&diffD(TODAY,ph.endDate)>=0&&diffD(TODAY,ph.endDate)<=7).map(ph=>({projId:p.id,pn:p.name,ph:ph.name,d:diffD(TODAY,ph.endDate)})));
+  const allProjects=[...projects,...collabProjects];
+  const sel=allProjects.find(p=>p.id===selId);
+  const filt=allProjects.filter(p=>!search||p.name.toLowerCase().includes(search.toLowerCase())||(p.client||"").toLowerCase().includes(search.toLowerCase()));
+  const alerts=allProjects.flatMap(p=>(p.phases||[]).filter(ph=>ph.status!=="approved"&&ph.status!=="rejected"&&diffD(TODAY,ph.endDate)>=0&&diffD(TODAY,ph.endDate)<=7).map(ph=>({projId:p.id,pn:p.name,ph:ph.name,d:diffD(TODAY,ph.endDate)})));
   const [showAlertMenu,setShowAlertMenu]=useState(false);
 
   const updPhase=(projId,phId,data)=>{
-    const proj=projects.find(p=>p.id===projId);
+    const proj=allProjects.find(p=>p.id===projId);
     if(!proj||!user) return;
     let newPhases=(proj.phases||[]).map(ph=>ph.phaseId!==phId?ph:{...ph,...data});
     const updPh=newPhases.find(p=>p.phaseId===phId);
     const cascadeEnd=data.endDate||(data.status==='approved'&&updPh?.endDate)||undefined;
     if(cascadeEnd) newPhases=cascadeForward(newPhases,phId,cascadeEnd,proj.avize||[]);
-    setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,phases:newPhases}));
-    updateProject(user.uid,projId,{phases:newPhases}).catch(e=>{
+    const ownerUid=proj._isCollab?proj.ownerUid:user.uid;
+    if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,phases:newPhases}));
+    else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,phases:newPhases}));
+    updateProject(ownerUid,projId,{phases:newPhases}).catch(e=>{
       console.error('updPhase write failed:',e);
       showToast('Eroare salvare faze — verifică conexiunea',T.red);
     });
   };
   const updAviz=(projId,avId,data)=>{
-    const proj=projects.find(p=>p.id===projId);
+    const proj=allProjects.find(p=>p.id===projId);
     if(!proj||!user) return;
     const newAvize=(proj.avize||[]).map(av=>av.avizId!==avId?av:{...av,...data});
     const avDocEnd=(proj.phases||[]).find(p=>p.phaseId==='ph_av_doc')?.endDate;
     const newPhases=avDocEnd
       ?cascadeForward(proj.phases||[],'ph_av_doc',avDocEnd,newAvize)
       :[...(proj.phases||[])];
-    setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize,phases:newPhases}));
-    updateProject(user.uid,projId,{avize:newAvize,phases:newPhases}).catch(e=>{
+    const ownerUid=proj._isCollab?proj.ownerUid:user.uid;
+    if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize,phases:newPhases}));
+    else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize,phases:newPhases}));
+    updateProject(ownerUid,projId,{avize:newAvize,phases:newPhases}).catch(e=>{
       console.error('updAviz write failed:',e);
       showToast('Eroare salvare avize — verifică conexiunea',T.red);
     });
+  };
+
+  const handleInvite=async()=>{
+    if(!inviteEmail.trim()||!sel||!user) return;
+    setInviteLoading(true);
+    try{
+      await inviteToProject(user.uid,sel.id,sel.name,user.email,inviteEmail.trim().toLowerCase());
+      showToast(`Invitație trimisă către ${inviteEmail.trim()}`,T.green);
+      setInviteEmail('');
+      setShowInviteModal(false);
+    }catch(e){
+      showToast('Eroare la trimiterea invitației',T.red);
+    }
+    setInviteLoading(false);
   };
 
   const handleNewProject=async()=>{
@@ -2364,6 +2411,7 @@ export default function App(){
                     <div style={{display:'flex',alignItems:'center',gap:5,flex:1,minWidth:0,paddingRight:6}}>
                       <div style={{width:6,height:6,borderRadius:'50%',background:projTypeColor(p.type),flexShrink:0}}/>
                       <div style={{fontSize:12,fontWeight:700,color:T.text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</div>
+                      {p._isCollab&&<span style={{fontSize:9,fontWeight:700,background:`${T.accent}20`,color:T.accent,borderRadius:3,padding:'1px 5px',flexShrink:0}}>Echipă</span>}
                     </div>
                     <span style={{fontSize:10,fontWeight:700,color:ov?T.red:pc===100?T.green:T.textDim,flexShrink:0}}>{pc}%</span>
                     <button onClick={e=>{e.stopPropagation();setProjMenuId(projMenuId===p.id?null:p.id);}}
@@ -2406,6 +2454,33 @@ export default function App(){
               );
             })}
           </div>
+          {/* Invitations banner */}
+          {!coll&&myInvitations.length>0&&(
+            <div style={{borderTop:`1px solid ${T.border}`,padding:'8px 10px',background:`${T.accent}10`}}>
+              {myInvitations.map(inv=>(
+                <div key={inv.pid} style={{marginBottom:6,lastChild:{marginBottom:0}}}>
+                  <div style={{fontSize:11,fontWeight:600,color:T.text,marginBottom:4,lineHeight:1.3}}>
+                    <span style={{color:T.accent}}>Invitație:</span> {inv.projectName}
+                    <div style={{fontSize:10,color:T.textDim,fontWeight:400}}>de la {inv.invitedBy}</div>
+                  </div>
+                  <div style={{display:'flex',gap:5}}>
+                    <button onClick={async()=>{
+                      try{
+                        await acceptInvitation(inv.ownerUid,inv.projectId||inv.pid,user.uid,user.email,user.displayName||user.email.split('@')[0]);
+                        showToast(`Ai intrat în proiect: ${inv.projectName}`,T.green);
+                      }catch(e){showToast('Eroare la acceptare',T.red);}
+                    }} style={{flex:1,background:T.accent,border:'none',borderRadius:5,padding:'4px 8px',color:'#fff',fontSize:10,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                      Acceptă
+                    </button>
+                    <button onClick={()=>declineInvitation(user.email,inv.projectId||inv.pid).catch(()=>{})}
+                      style={{background:'transparent',border:`1px solid ${T.borderLt}`,borderRadius:5,padding:'4px 8px',color:T.textDim,fontSize:10,cursor:'pointer',fontFamily:'inherit'}}>
+                      Refuză
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {!coll&&<div style={{padding:"8px 14px",borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:6}}>
             <Calendar size={11} color={T.textDim}/><span style={{fontSize:10,color:T.textDim}}>{fmt(TODAY)}</span>
           </div>}
@@ -2585,13 +2660,27 @@ export default function App(){
                       {sel.client&&<span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,color:T.textDim}}><User size={11}/>{sel.client}</span>}
                       {sel.location&&<span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,color:T.textDim}}><Map size={11}/>{sel.location}</span>}
                       <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,color:T.textDim}}><Calendar size={11}/>{fmt(sel.startDate)}</span>
-                      {/* member avatars in header */}
-                      <div style={{display:"flex",alignItems:"center",marginLeft:4}}>
-                        {(sel.members||[]).slice(0,5).map((m,i)=>(
-                          <Avatar key={m.id} name={m.name} email={m.email} size={20} style={{marginLeft:i===0?0:-5,border:`1.5px solid ${T.bg}`}} title={m.name}/>
-                        ))}
-                        {sel.members?.length>5&&<span style={{fontSize:10,color:T.textDim,marginLeft:4}}>+{sel.members.length-5}</span>}
-                      </div>
+                      {/* team members row */}
+                      {(projMembers.length>0||sel._isCollab)&&(
+                        <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:2}}>
+                          {/* owner avatar */}
+                          {sel._isCollab&&<Avatar name={sel.ownerUid?.slice(-4)||'?'} email={''} size={20} style={{border:`1.5px solid ${T.green}`,flexShrink:0}} title={'Proprietar'}/>}
+                          {projMembers.slice(0,4).map((m,i)=>(
+                            <Avatar key={m.uid} name={m.name||m.email} email={m.email||''} size={20} style={{marginLeft:i===0&&!sel._isCollab?0:-5,border:`1.5px solid ${T.bg}`,flexShrink:0}} title={`${m.name||m.email} (${m.role})`}/>
+                          ))}
+                          {projMembers.length>4&&<span style={{fontSize:10,color:T.textDim,marginLeft:4}}>+{projMembers.length-4}</span>}
+                          <span style={{fontSize:10,color:T.textDim}}>
+                            {sel._isCollab?'Echipă':'·'}
+                          </span>
+                        </div>
+                      )}
+                      {/* invite button — only owner sees it */}
+                      {!sel._isCollab&&(
+                        <button onClick={()=>setShowInviteModal(true)}
+                          style={{display:'inline-flex',alignItems:'center',gap:4,background:'transparent',border:`1px solid ${T.borderLt}`,borderRadius:5,padding:'2px 8px',color:T.textMd,cursor:'pointer',fontSize:10,fontFamily:'inherit'}}>
+                          <UserPlus size={10}/>Invită coleg
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div style={{display:"flex",background:T.sidebar,borderRadius:8,padding:3,border:`1px solid ${T.border}`,gap:2}}>
@@ -2799,6 +2888,53 @@ export default function App(){
             <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
               <button onClick={()=>setShowDeleteConfirm(false)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:7,padding:'7px 16px',color:T.textMd,cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>Anulează</button>
               <button onClick={handleDeleteProject} style={{background:T.red,border:'none',borderRadius:7,padding:'7px 18px',color:'#fff',fontWeight:600,cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>Șterge</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal invitare colaborator */}
+      {showInviteModal&&sel&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200}} onClick={()=>{setShowInviteModal(false);setInviteEmail('');}}>
+          <div style={{background:T.panel,border:`1px solid ${T.borderLt}`,borderRadius:14,padding:28,width:400,boxShadow:T.shadowLg}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:6}}>Invită colaborator</div>
+            <div style={{fontSize:12,color:T.textDim,marginBottom:18}}>
+              Proiect: <strong style={{color:T.text}}>{sel.name}</strong>
+            </div>
+            {/* existing members */}
+            {projMembers.length>0&&(
+              <div style={{marginBottom:16,padding:'10px 12px',background:T.bg,borderRadius:8,border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:10,fontWeight:600,color:T.textDim,textTransform:'uppercase',letterSpacing:.7,marginBottom:8}}>Membri actuali</div>
+                {projMembers.map(m=>(
+                  <div key={m.uid} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                    <Avatar name={m.name||m.email} email={m.email||''} size={24}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,color:T.text,fontWeight:500}}>{m.name||m.email}</div>
+                      <div style={{fontSize:10,color:T.textDim}}>{m.email}</div>
+                    </div>
+                    <span style={{fontSize:10,color:T.textMd,background:T.panel,border:`1px solid ${T.border}`,borderRadius:4,padding:'2px 6px'}}>Editor</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{marginBottom:6,fontSize:10,color:T.textDim,textTransform:'uppercase',letterSpacing:.7}}>Email coleg nou</div>
+            <input
+              value={inviteEmail}
+              onChange={e=>setInviteEmail(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&!inviteLoading&&inviteEmail.trim()&&handleInvite()}
+              placeholder="coleg@studiokolectiv.ro"
+              style={{width:'100%',background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:8,padding:'9px 12px',color:T.text,fontSize:13,outline:'none',fontFamily:'inherit',marginBottom:16,boxSizing:'border-box'}}
+              autoFocus
+            />
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button onClick={()=>{setShowInviteModal(false);setInviteEmail('');}}
+                style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:7,padding:'7px 16px',color:T.textMd,cursor:'pointer',fontSize:12,fontFamily:'inherit'}}>
+                Anulează
+              </button>
+              <button onClick={handleInvite} disabled={!inviteEmail.trim()||inviteLoading}
+                style={{background:T.accent,border:'none',borderRadius:7,padding:'7px 18px',color:'#fff',fontWeight:600,cursor:'pointer',fontSize:12,fontFamily:'inherit',opacity:!inviteEmail.trim()||inviteLoading?0.5:1}}>
+                {inviteLoading?'Se trimite…':'Trimite invitație'}
+              </button>
             </div>
           </div>
         </div>

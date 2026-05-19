@@ -225,3 +225,70 @@ export const getSharedProject = async (token) => {
 
 export const deleteShareLink = (token) =>
   remove(ref(rtdb, `sharedProjects/${token}`))
+
+// ── COLLABORATION ─────────────────────────────────────────────────────────────
+export const inviteToProject = (ownerUid, projectId, projectName, inviterEmail, guestEmail) =>
+  set(ref(rtdb, `invitations/${guestEmail.replace(/[@.]/g, '_')}/${projectId}`), {
+    projectId, ownerUid, projectName, invitedBy: inviterEmail, guestEmail,
+    createdAt: serverTimestamp()
+  })
+
+export const listenMyInvitations = (email, cb) =>
+  onValue(
+    ref(rtdb, `invitations/${email.replace(/[@.]/g, '_')}`),
+    snap => {
+      const val = snap.val()
+      cb(val ? Object.entries(val).map(([pid, d]) => ({ pid, ...d })) : [])
+    }
+  )
+
+export const acceptInvitation = async (ownerUid, projectId, memberUid, memberEmail, memberName) => {
+  await set(ref(rtdb, `projectMembers/${ownerUid}/${projectId}/${memberUid}`), {
+    email: memberEmail, name: memberName, role: 'editor', canEdit: true, addedAt: serverTimestamp()
+  })
+  await set(ref(rtdb, `myCollabs/${memberUid}/${projectId}`), {
+    ownerUid, joinedAt: serverTimestamp()
+  })
+  await remove(ref(rtdb, `invitations/${memberEmail.replace(/[@.]/g, '_')}/${projectId}`))
+}
+
+export const declineInvitation = (email, projectId) =>
+  remove(ref(rtdb, `invitations/${email.replace(/[@.]/g, '_')}/${projectId}`))
+
+export const listenProjectMembers = (ownerUid, projectId, cb) =>
+  onValue(
+    ref(rtdb, `projectMembers/${ownerUid}/${projectId}`),
+    snap => {
+      const val = snap.val()
+      cb(val ? Object.entries(val).map(([uid, d]) => ({ uid, ...d })) : [])
+    }
+  )
+
+export const removeProjectMember = (ownerUid, projectId, memberUid) =>
+  remove(ref(rtdb, `projectMembers/${ownerUid}/${projectId}/${memberUid}`))
+
+export const listenCollabProjects = (uid, cb) => {
+  const collabRef = ref(rtdb, `myCollabs/${uid}`)
+  const projectListeners = new Map()
+  const projectData = new Map()
+  const notify = () =>
+    cb(Array.from(projectData.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)))
+  const collabUnsub = onValue(collabRef, snap => {
+    const val = snap.val() || {}
+    for (const pid of projectListeners.keys()) {
+      if (!val[pid]) { projectListeners.get(pid)(); projectListeners.delete(pid); projectData.delete(pid); }
+    }
+    for (const [pid, { ownerUid }] of Object.entries(val)) {
+      if (!projectListeners.has(pid)) {
+        const u = onValue(ref(rtdb, `users/${ownerUid}/projects/${pid}`), psnap => {
+          if (psnap.exists()) projectData.set(pid, { id: pid, ownerUid, _isCollab: true, ...psnap.val() })
+          else projectData.delete(pid)
+          notify()
+        })
+        projectListeners.set(pid, u)
+      }
+    }
+    if (!Object.keys(val).length) notify()
+  })
+  return () => { collabUnsub(); projectListeners.forEach(u => u()); }
+}
