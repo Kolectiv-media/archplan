@@ -954,7 +954,7 @@ const PhasesView=({project,onUpdate,T})=>{
   const [linkUrl,setLinkUrl]=useState('');
   const [linkName,setLinkName]=useState('');
   const inp={width:'100%',background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:6,padding:'4px 8px',color:T.text,fontSize:11,outline:'none',fontFamily:'inherit',boxSizing:'border-box'};
-  const cols="12px 1fr 76px 76px 130px 62px 44px";
+  const cols="22px 1fr 76px 76px 130px 62px 44px";
   return(
     <div style={{border:`1px solid ${T.border}`,borderRadius:10,overflow:"hidden"}}>
       <div style={{display:"grid",gridTemplateColumns:cols,gap:8,padding:"8px 16px",background:T.sidebar,borderBottom:`1px solid ${T.border}`}}>
@@ -972,7 +972,18 @@ const PhasesView=({project,onUpdate,T})=>{
               style={{display:"grid",gridTemplateColumns:cols,gap:8,alignItems:"center",padding:"9px 16px",borderBottom:`1px solid ${T.border}`,cursor:"pointer",background:ov?`${T.red}06`:"transparent",transition:"background .12s"}}
               onMouseEnter={e=>e.currentTarget.style.background=ov?`${T.red}0c`:T.panelHov}
               onMouseLeave={e=>e.currentTarget.style.background=ov?`${T.red}06`:"transparent"}>
-              <div style={{width:8,height:8,borderRadius:"50%",background:STATUS_META[ph.status]?.color||T.textDim,flexShrink:0}}/>
+              <div
+                onClick={e=>{e.stopPropagation();onUpdate(ph.phaseId,{status:ph.status==='approved'?'pending':'approved'});}}
+                title={ph.status==='approved'?'Marchează ca neîncheiat':'Marchează ca finalizat'}
+                style={{width:18,height:18,borderRadius:'50%',flexShrink:0,cursor:'pointer',
+                  border:`2px solid ${ph.status==='approved'?T.green:T.borderLt}`,
+                  background:ph.status==='approved'?T.green:'transparent',
+                  display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s'}}
+                onMouseEnter={e=>{if(ph.status!=='approved'){e.currentTarget.style.borderColor=T.green;e.currentTarget.style.background=T.greenBg;}}}
+                onMouseLeave={e=>{if(ph.status!=='approved'){e.currentTarget.style.borderColor=T.borderLt;e.currentTarget.style.background='transparent';}}}
+              >
+                {ph.status==='approved'&&<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
               <div>
                 <div style={{fontSize:12,color:T.text,fontWeight:500}}>{ph.name}</div>
                 {ph.note&&<div style={{fontSize:10,color:T.textDim,marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ph.note}</div>}
@@ -1973,7 +1984,9 @@ export default function App(){
     const proj=projects.find(p=>p.id===projId);
     if(!proj||!user) return;
     let newPhases=(proj.phases||[]).map(ph=>ph.phaseId!==phId?ph:{...ph,...data});
-    if(data.endDate) newPhases=cascadeForward(newPhases,phId,data.endDate,proj.avize||[]);
+    const updPh=newPhases.find(p=>p.phaseId===phId);
+    const cascadeEnd=data.endDate||(data.status==='approved'&&updPh?.endDate)||undefined;
+    if(cascadeEnd) newPhases=cascadeForward(newPhases,phId,cascadeEnd,proj.avize||[]);
     setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,phases:newPhases}));
     updateProject(user.uid,projId,{phases:newPhases}).catch(e=>{
       console.error('updPhase write failed:',e);
