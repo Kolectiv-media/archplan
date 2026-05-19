@@ -5,7 +5,7 @@ import {
   Download, Upload, Link2, ExternalLink, X, Calendar, Map, Settings,
   PanelLeftClose, PanelLeftOpen, LogOut, MessageSquare, Send, Paperclip,
   AtSign, Hash, Users, UserPlus, Trash2, CheckSquare, Zap, Flame,
-  Droplets, Radio, Leaf, ChevronDown, MoreVertical, Lock
+  Droplets, Radio, Leaf, ChevronDown, MoreVertical, Lock, RefreshCw
 } from "lucide-react";
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
@@ -13,7 +13,7 @@ import LoginPage from './pages/LoginPage.jsx'
 import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail } from './lib/emailService.js'
 import { forceFirestoreSync, db } from './lib/firebase.js'
-import { getDoc, doc } from 'firebase/firestore'
+import { getDoc, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
 const DARK = {
@@ -1935,39 +1935,41 @@ export default function App(){
     return()=>{window.removeEventListener('online',onOnline);window.removeEventListener('offline',onOffline);};
   },[])
 
-  // Firestore connectivity probe using REST API — bypasses SDK to test raw HTTP
-  const [fsProbeResult, setFsProbeResult] = useState(null) // null | 'ok' | string
-  const [fetchProbe, setFetchProbe] = useState(null) // null | 'ok' | 'blocked'
+  // Firestore read+write probe — runs once after login to confirm both work
+  const [fsProbeResult, setFsProbeResult] = useState(null) // null|'ok'|string
+  const [fetchProbe, setFetchProbe] = useState(null)
   useEffect(()=>{
     if(!user) return;
     setFsProbeResult(null); setFetchProbe(null);
-
-    // Probe 1: raw fetch to Firebase REST (no SDK) — tests if firestore.googleapis.com is reachable at all
     fetch('https://firestore.googleapis.com/v1/projects/archplan-kolectiv/databases')
-      .then(r => setFetchProbe(r.status===401||r.status===403||r.ok ? 'ok' : `http-${r.status}`))
-      .catch(() => setFetchProbe('blocked'))
-
-    // Probe 2: authenticated fetch — tests auth + rules
+      .then(r=>setFetchProbe(r.status===401||r.status===403||r.ok?'ok':`http-${r.status}`))
+      .catch(()=>setFetchProbe('blocked'))
     const probe = async () => {
       try {
-        const token = await user.getIdToken()
-        const resp = await fetch(
-          `https://firestore.googleapis.com/v1/projects/archplan-kolectiv/databases/(default)/documents/settings/accessControl`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        )
-        if(resp.ok || resp.status===404) {
-          setFsProbeResult('ok')
-        } else {
-          const txt = await resp.text().catch(()=>'')
-          const msg = txt.match(/"message":"([^"]+)"/)?.[1] || `HTTP ${resp.status}`
-          setFsProbeResult(msg.slice(0,80))
-        }
+        // Test write: write then delete a probe document under the user's own path
+        const testRef = doc(db, 'users', user.uid, '_probe', 'test')
+        await setDoc(testRef, { ts: serverTimestamp() })
+        await deleteDoc(testRef)
+        setFsProbeResult('ok')
       } catch(e) {
-        setFsProbeResult(`net: ${e.message?.slice(0,60)||'fetch failed'}`)
+        setFsProbeResult(e.code || e.message || 'unknown')
       }
     }
     probe()
   },[user])
+
+  // Clear all local Firebase cache and localStorage — nuclear reset for stale data
+  const handleClearLocalCache = async () => {
+    try {
+      localStorage.removeItem(projCacheKey(user?.uid))
+      const dbs = await indexedDB.databases?.() || []
+      await Promise.all(
+        dbs.filter(d=>d.name?.toLowerCase().includes('firestore')||d.name?.toLowerCase().includes('firebase'))
+           .map(d=>new Promise(res=>{ const r=indexedDB.deleteDatabase(d.name); r.onsuccess=res; r.onerror=res; }))
+      )
+    } catch(e) { console.warn('clearCache:', e) }
+    window.location.reload()
+  }
 
   useEffect(()=>{
     const onVisible=()=>{ if(document.visibilityState==='visible') forceFirestoreSync() }
@@ -2356,6 +2358,10 @@ export default function App(){
                 </div>
                 <button onClick={()=>{setUMenu(false);setShowChangePinModal(true);}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.textMd,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}>
                   <Lock size={13}/>Schimbă PIN financiar
+                </button>
+                <button onClick={()=>{setUMenu(false);handleClearLocalCache();}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.amber,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}
+                  title="Șterge cache-ul local și resincronizează de pe server">
+                  <RefreshCw size={13}/>Resetează cache local
                 </button>
                 <button onClick={()=>{setUMenu(false);logout();}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.red,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}>
                   <LogOut size={13}/>Deconectare
