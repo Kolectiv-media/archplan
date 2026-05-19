@@ -242,14 +242,22 @@ export const listenMyInvitations = (email, cb) =>
     }
   )
 
-export const acceptInvitation = async (ownerUid, projectId, memberUid, memberEmail, memberName) => {
+export const acceptInvitation = async (ownerUid, projectId, memberUid, memberEmail, memberName, ownerEmail = '') => {
   await set(ref(rtdb, `projectMembers/${ownerUid}/${projectId}/${memberUid}`), {
     email: memberEmail, name: memberName, role: 'editor', canEdit: true, addedAt: serverTimestamp()
   })
   await set(ref(rtdb, `myCollabs/${memberUid}/${projectId}`), {
-    ownerUid, joinedAt: serverTimestamp()
+    ownerUid, ownerEmail, joinedAt: serverTimestamp()
   })
   await remove(ref(rtdb, `invitations/${memberEmail.replace(/[@.]/g, '_')}/${projectId}`))
+}
+
+export const revokeAccess = async (email) => {
+  const snap = await get(ref(rtdb, 'settings/accessControl'))
+  const current = snap.val() || {}
+  const existing = toArr(current.approvedEmails).filter(e => e !== email)
+  await update(ref(rtdb, 'settings/accessControl'), { approvedEmails: existing })
+  await update(ref(rtdb, `accessRequests/${email.replace(/[@.]/g, '_')}`), { status: 'revoked' })
 }
 
 export const declineInvitation = (email, projectId) =>
@@ -278,10 +286,10 @@ export const listenCollabProjects = (uid, cb) => {
     for (const pid of projectListeners.keys()) {
       if (!val[pid]) { projectListeners.get(pid)(); projectListeners.delete(pid); projectData.delete(pid); }
     }
-    for (const [pid, { ownerUid }] of Object.entries(val)) {
+    for (const [pid, { ownerUid, ownerEmail = '' }] of Object.entries(val)) {
       if (!projectListeners.has(pid)) {
         const u = onValue(ref(rtdb, `users/${ownerUid}/projects/${pid}`), psnap => {
-          if (psnap.exists()) projectData.set(pid, { id: pid, ownerUid, _isCollab: true, ...psnap.val() })
+          if (psnap.exists()) projectData.set(pid, { id: pid, ownerUid, ownerEmail, _isCollab: true, ...psnap.val() })
           else projectData.delete(pid)
           notify()
         })

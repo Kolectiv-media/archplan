@@ -11,7 +11,7 @@ import {
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, listenCollabProjects } from './lib/db.js'
+import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, revokeAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, removeProjectMember, listenCollabProjects } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail, sendInvitationEmail } from './lib/emailService.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
@@ -583,7 +583,7 @@ const SharedView = ({ token }) => {
 }
 
 /* ─── CHAT COMPONENT ─────────────────────────────────────────────────────────── */
-const Chat=({project,T,currentUser,showToast,approvedUsers=[]})=>{
+const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidProp})=>{
   const [channel,   setChannel]   = useState("general");
   const [messages,  setMessages]  = useState([]);
   const [text,      setText]      = useState("");
@@ -599,6 +599,7 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[]})=>{
   const [showNewMem,setShowNewMem]= useState(false);
   const [members,   setMembers]   = useState(project.members||[]);
   const { user } = useAuth();
+  const ownerUid = ownerUidProp || user?.uid
   const bottomRef = useRef();
   const inputRef  = useRef();
 
@@ -607,8 +608,8 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[]})=>{
   },[project.members]);
 
   useEffect(()=>{
-    if (!user) return;
-    const unsub = listenMessages(user.uid, project.id, channel, (msgs)=>{
+    if (!user || !ownerUid) return;
+    const unsub = listenMessages(ownerUid, project.id, channel, (msgs)=>{
       setMessages(msgs.map(m=>({...m, ts: m.createdAt ? new Date(m.createdAt) : m.ts})));
     });
     return unsub;
@@ -637,7 +638,7 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[]})=>{
   const handleSend=()=>{
     if(!text.trim()&&!pendingAtt.length) return;
     if(!user) return;
-    dbSendMsg(user.uid, project.id, channel, {
+    dbSendMsg(ownerUid, project.id, channel, {
       uid: currentUser.id,
       displayName: currentUser.name,
       text: text.trim(),
@@ -656,7 +657,7 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[]})=>{
 
   const deleteMsg=(msgId)=>{
     if(!user) return;
-    dbDeleteMsg(user.uid, project.id, channel, msgId);
+    dbDeleteMsg(ownerUid, project.id, channel, msgId);
   };
 
   const addExtLink=()=>{
@@ -670,12 +671,13 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[]})=>{
     const newMem={id:uid(),name:newMemName.trim(),email:newMemEmail.trim(),role:"member"};
     const updatedMems=[...members,newMem];
     setMembers(updatedMems);
-    updateProject(user.uid, project.id, {members:updatedMems});
+    updateProject(ownerUid, project.id, {members:updatedMems});
     setNewMemName("");setNewMemEmail("");setShowNewMem(false);
     showToast(`👤 ${newMemName} adăugat în proiect`,T.green);
   };
 
-  const filteredMembers=mentionQ!==null?members.filter(m=>m.name.toLowerCase().includes(mentionQ.toLowerCase())).slice(0,5):[];
+  const allMentionable=[...members,...approvedUsers.filter(u=>!members.some(m=>m.email===u.email))];
+  const filteredMembers=mentionQ!==null?allMentionable.filter(m=>(m.name||m.email||'').toLowerCase().includes(mentionQ.toLowerCase())).slice(0,6):[];
   const ChanIcon=CHANNELS.find(c=>c.id===channel)?.Icon||Hash;
   const chanLabel=CHANNELS.find(c=>c.id===channel)?.label||channel;
 
@@ -1839,6 +1841,7 @@ export default function App(){
   const [accessStatus, setAccessStatus] = useState('approved')
   const [pendingRequests, setPendingRequests] = useState([])
   const [showRequests, setShowRequests] = useState(false)
+  const [showUsersPage, setShowUsersPage] = useState(false)
   const [themeMode,setThemeMode]=useState("auto");
   const sysDark=window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const T=themeMode==="dark"||(themeMode==="auto"&&sysDark)?DARK:LIGHT;
@@ -2448,6 +2451,9 @@ export default function App(){
                 <div style={{padding:"7px 12px",fontSize:11,color:T.textDim,display:"flex",alignItems:"center",gap:6}}>
                   <Settings size={11}/>{COMPANY.name}
                 </div>
+                <button onClick={()=>{setUMenu(false);setShowUsersPage(true);}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.textMd,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}>
+                  <Users size={13}/>Gestionare utilizatori
+                </button>
                 <button onClick={()=>{setUMenu(false);setShowChangePinModal(true);}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.textMd,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}>
                   <Lock size={13}/>Schimbă PIN financiar
                 </button>
@@ -2570,7 +2576,7 @@ export default function App(){
                         return;
                       }
                       try{
-                        await acceptInvitation(inv.ownerUid,inv.projectId||inv.pid,user.uid,user.email,user.displayName||user.email.split('@')[0]);
+                        await acceptInvitation(inv.ownerUid,inv.projectId||inv.pid,user.uid,user.email,user.displayName||user.email.split('@')[0],inv.invitedBy||'');
                         showToast(`Ai intrat în proiect: ${inv.projectName}`,T.green);
                       }catch(e){showToast('Eroare la acceptare',T.red);}
                     }} style={{flex:1,background:T.accent,border:'none',borderRadius:5,padding:'4px 8px',color:'#fff',fontSize:10,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
@@ -2768,7 +2774,7 @@ export default function App(){
                       {(projMembers.length>0||sel._isCollab)&&(
                         <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:2}}>
                           {/* owner avatar */}
-                          {sel._isCollab&&<Avatar name={sel.ownerUid?.slice(-4)||'?'} email={''} size={20} style={{border:`1.5px solid ${T.green}`,flexShrink:0}} title={'Proprietar'}/>}
+                          {sel._isCollab&&<Avatar name={approvedUsers.find(u=>u.email===sel.ownerEmail)?.name||sel.ownerEmail?.split('@')[0]||'Owner'} email={sel.ownerEmail||''} size={20} style={{border:`1.5px solid ${T.green}`,flexShrink:0}} title={`Proprietar: ${sel.ownerEmail||sel.ownerUid}`}/>}
                           {projMembers.slice(0,4).map((m,i)=>(
                             <Avatar key={m.uid} name={m.name||m.email} email={m.email||''} size={20} style={{marginLeft:i===0&&!sel._isCollab?0:-5,border:`1.5px solid ${T.bg}`,flexShrink:0}} title={`${m.name||m.email} (${m.role})`}/>
                           ))}
@@ -2817,11 +2823,22 @@ export default function App(){
                           import('html2canvas'),
                           import('jspdf'),
                         ])
-                        const canvas = await html2canvas(ganttRef.current, {
+                        const el = ganttRef.current
+                        const scrollEl = el.querySelector('div[style*="overflow"]') || el
+                        const prevOvf = scrollEl.style.overflowX
+                        const prevW   = scrollEl.style.width
+                        scrollEl.style.overflowX = 'visible'
+                        scrollEl.style.width = scrollEl.scrollWidth + 'px'
+                        const canvas = await html2canvas(el, {
                           backgroundColor: T===DARK?'#161b22':'#ffffff',
                           scale: 2,
                           useCORS: true,
+                          logging: false,
+                          width: el.scrollWidth,
+                          height: el.scrollHeight,
                         })
+                        scrollEl.style.overflowX = prevOvf
+                        scrollEl.style.width = prevW
                         const pdf = new jsPDF({orientation:'landscape',unit:'mm',format:'a3'})
                         const pw = pdf.internal.pageSize.getWidth()
                         const ph = pdf.internal.pageSize.getHeight()
@@ -2847,7 +2864,7 @@ export default function App(){
                   </div>
                 </div>
               )}
-              {tab==="chat"&&<Chat project={sel} T={T} currentUser={CURRENT_USER} showToast={showToast} approvedUsers={approvedUsers}/>}
+              {tab==="chat"&&<Chat project={sel} T={T} currentUser={CURRENT_USER} showToast={showToast} approvedUsers={approvedUsers} ownerUid={sel._isCollab?sel.ownerUid:user.uid}/>}
               {tab==="contract"&&<ContractView project={sel} T={T} onUpdate={(data)=>{
                 if(!user) return
                 updateProject(user.uid,sel.id,data)
@@ -3045,6 +3062,81 @@ export default function App(){
       )}
 
       {/* Modal cereri de acces */}
+      {/* ── USERS MANAGEMENT PAGE ── */}
+      {showUsersPage&&(
+        <div style={{position:"fixed",inset:0,background:T.bg,zIndex:300,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{height:48,background:T.sidebar,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 20px",gap:12,flexShrink:0}}>
+            <button onClick={()=>setShowUsersPage(false)} style={{background:"none",border:"none",cursor:"pointer",color:T.accent,fontSize:12,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6,fontWeight:600,padding:0}}>
+              ← Înapoi
+            </button>
+            <div style={{width:1,height:18,background:T.border}}/>
+            <Users size={14} color={T.textMd}/>
+            <span style={{fontSize:14,fontWeight:700,color:T.text}}>Gestionare utilizatori</span>
+            <span style={{fontSize:11,color:T.textDim,marginLeft:4}}>{approvedUsers.length} activi · {pendingRequests.length} în așteptare</span>
+          </div>
+          <div style={{flex:1,overflow:"auto",padding:24}}>
+            {/* Pending requests */}
+            {pendingRequests.length>0&&(
+              <div style={{marginBottom:32}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.amber,textTransform:"uppercase",letterSpacing:.8,marginBottom:12,display:"flex",alignItems:"center",gap:6}}>
+                  <AlertCircle size={12}/>Cereri în așteptare ({pendingRequests.length})
+                </div>
+                <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,overflow:"hidden"}}>
+                  {pendingRequests.map((r,i)=>(
+                    <div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<pendingRequests.length-1?`1px solid ${T.border}`:"none"}}>
+                      <Avatar name={r.name||r.email} email={r.email} size={32}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600,color:T.text}}>{r.name||r.email}</div>
+                        <div style={{fontSize:11,color:T.textDim}}>{r.email}</div>
+                      </div>
+                      <div style={{fontSize:10,color:T.textDim}}>{r.requestedAt?new Date(r.requestedAt).toLocaleDateString('ro-RO'):''}</div>
+                      <button onClick={()=>approveAccess(r.email).then(()=>showToast(`${r.email} aprobat`,T.green))} style={{background:T.greenBg,border:`1px solid ${T.green}44`,borderRadius:6,padding:"5px 14px",color:T.green,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Aprobă</button>
+                      <button onClick={()=>rejectAccess(r.email).then(()=>showToast(`${r.email} respins`,T.red))} style={{background:T.redBg,border:`1px solid ${T.red}44`,borderRadius:6,padding:"5px 14px",color:T.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Respinge</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Approved users */}
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:.8,marginBottom:12,display:"flex",alignItems:"center",gap:6}}>
+                <CheckCircle size={12}/>Utilizatori activi ({approvedUsers.length})
+              </div>
+              <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,overflow:"hidden"}}>
+                {approvedUsers.length===0&&<div style={{padding:"20px 16px",fontSize:12,color:T.textDim,textAlign:"center"}}>Niciun utilizator aprobat</div>}
+                {approvedUsers.map((u,i)=>{
+                  const isMe = user&&u.email===user.email
+                  const projCount = [...projects,...collabProjects].filter(p=>p._isCollab?p.ownerEmail===u.email:false).length
+                  return(
+                    <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<approvedUsers.length-1?`1px solid ${T.border}`:"none",background:isMe?`${T.accent}08`:""}}>
+                      <Avatar name={u.name||u.email} email={u.email} size={32}/>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:13,fontWeight:600,color:T.text}}>{u.name||u.email}</span>
+                          {isMe&&<span style={{fontSize:9,background:`${T.accent}20`,color:T.accent,borderRadius:4,padding:"1px 6px",fontWeight:700}}>Tu</span>}
+                        </div>
+                        <div style={{fontSize:11,color:T.textDim}}>{u.email}</div>
+                      </div>
+                      <div style={{fontSize:10,color:T.textDim,textAlign:"right"}}>
+                        <div>Aprobat {u.requestedAt?new Date(u.requestedAt).toLocaleDateString('ro-RO'):''}</div>
+                      </div>
+                      {!isMe&&(
+                        <button onClick={()=>{
+                          if(!window.confirm(`Revocare acces pentru ${u.email}?`)) return
+                          revokeAccess(u.email).then(()=>showToast(`Acces revocat: ${u.email}`,T.red))
+                        }} style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 12px",color:T.textMd,fontSize:11,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
+                          <X size={11}/>Revocă
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRequests&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200}} onClick={()=>setShowRequests(false)}>
           <div style={{background:T.panel,border:`1px solid ${T.borderLt}`,borderRadius:14,padding:28,width:440,maxHeight:'80vh',overflow:'auto',boxShadow:T.shadowLg}} onClick={e=>e.stopPropagation()}>
