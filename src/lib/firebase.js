@@ -1,10 +1,7 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import {
-  initializeFirestore,
-  persistentLocalCache,
-  persistentSingleTabManager,
-  memoryLocalCache,
+  getFirestore,
   enableNetwork,
   disableNetwork,
 } from 'firebase/firestore'
@@ -23,20 +20,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 
-// persistentLocalCache: writes survive refresh even when offline (IndexedDB).
-// Falls back to memoryLocalCache if IndexedDB is unavailable (private browsing).
-// experimentalAutoDetectLongPolling: WebSocket-first, auto HTTP long-poll fallback.
-let localCache
-try {
-  localCache = persistentLocalCache({ tabManager: persistentSingleTabManager() })
-} catch {
-  localCache = memoryLocalCache()
-}
-
-export const db = initializeFirestore(app, {
-  experimentalAutoDetectLongPolling: true,
-  localCache,
-})
+// Minimal init — no experimental options, no custom cache
+// Testing if the connection issue is in our config or in Firebase project setup
+export const db = getFirestore(app)
 
 export const storage = getStorage(app)
 export const googleProvider = new GoogleAuthProvider()

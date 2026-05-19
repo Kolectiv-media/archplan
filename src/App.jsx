@@ -1909,10 +1909,18 @@ export default function App(){
   },[])
 
   // Firestore connectivity probe using REST API — bypasses SDK to test raw HTTP
-  const [fsProbeResult, setFsProbeResult] = useState(null) // null | 'ok' | string(error)
+  const [fsProbeResult, setFsProbeResult] = useState(null) // null | 'ok' | string
+  const [fetchProbe, setFetchProbe] = useState(null) // null | 'ok' | 'blocked'
   useEffect(()=>{
     if(!user) return;
-    setFsProbeResult(null);
+    setFsProbeResult(null); setFetchProbe(null);
+
+    // Probe 1: raw fetch to Firebase REST (no SDK) — tests if firestore.googleapis.com is reachable at all
+    fetch('https://firestore.googleapis.com/v1/projects/archplan-kolectiv/databases')
+      .then(r => setFetchProbe(r.status===401||r.status===403||r.ok ? 'ok' : `http-${r.status}`))
+      .catch(() => setFetchProbe('blocked'))
+
+    // Probe 2: authenticated fetch — tests auth + rules
     const probe = async () => {
       try {
         const token = await user.getIdToken()
@@ -1921,14 +1929,13 @@ export default function App(){
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if(resp.ok || resp.status===404) {
-          setFsProbeResult('ok') // reachable — 404 = doc doesn't exist yet, that's fine
+          setFsProbeResult('ok')
         } else {
           const txt = await resp.text().catch(()=>'')
           const msg = txt.match(/"message":"([^"]+)"/)?.[1] || `HTTP ${resp.status}`
           setFsProbeResult(msg.slice(0,80))
         }
       } catch(e) {
-        // Network-level failure — Firebase servers unreachable
         setFsProbeResult(`net: ${e.message?.slice(0,60)||'fetch failed'}`)
       }
     }
@@ -2710,12 +2717,17 @@ export default function App(){
             </span>
             {user&&<span style={{fontSize:9,color:T.textDim,fontFamily:'monospace',marginLeft:2}}>({user.email?.split('@')[0]})</span>}
           </div>
-          {fsProbeResult&&fsProbeResult!=='ok'&&(
+          {(fetchProbe||fsProbeResult)&&(
             <>
               <div style={{height:10,width:1,background:T.border}}/>
-              <span style={{fontSize:10,fontWeight:600,color:T.red,maxWidth:300,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-                title={`Eroare Firebase REST: ${fsProbeResult}`}>
-                ⚠ {fsProbeResult}
+              <span style={{fontSize:10,fontWeight:600,
+                color:fetchProbe==='ok'&&fsProbeResult==='ok'?T.green:T.red,
+                maxWidth:320,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                title={`HTTP probe: ${fetchProbe} | Auth probe: ${fsProbeResult}`}>
+                {fetchProbe==='blocked'?'⚠ firestore.googleapis.com blocat'
+                  :fetchProbe==='ok'&&fsProbeResult==='ok'?'✓ Firebase OK'
+                  :fetchProbe==='ok'&&fsProbeResult?`⚠ Auth: ${fsProbeResult}`
+                  :`⚠ ${fetchProbe||''} ${fsProbeResult||''}`}
               </span>
             </>
           )}
