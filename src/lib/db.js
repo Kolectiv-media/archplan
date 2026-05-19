@@ -1,165 +1,227 @@
-// src/lib/db.js  — Firestore CRUD + real-time listeners
-import {
-  collection, doc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, where, orderBy, serverTimestamp, getDoc, setDoc, arrayUnion
-} from 'firebase/firestore'
-import { db } from './firebase.js'
+// src/lib/db.js — Firebase Realtime Database CRUD + real-time listeners
+import { ref, onValue, push, set, update, remove, get, serverTimestamp } from 'firebase/database'
+import { rtdb } from './firebase.js'
+
+const toArr = v => !v ? [] : Array.isArray(v) ? v : Object.values(v)
+
+// ── CONNECTION STATUS ─────────────────────────────────────────────────────────
+export const listenConnected = (cb) =>
+  onValue(ref(rtdb, '.info/connected'), snap => cb(snap.val() === true))
 
 // ── PROJECTS ─────────────────────────────────────────────────────────────────
-export const projectsCol = (uid) => collection(db, 'users', uid, 'projects')
-
 export const listenProjects = (uid, cb, onErr) =>
-  onSnapshot(
-    collection(db, 'users', uid, 'projects'),
-    { includeMetadataChanges: true },
-    snap => cb(
-      snap.docs.map(d => ({ id: d.id, ...d.data() }))
-               .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0)),
-      snap.metadata.fromCache
-    ),
-    err => { console.error('listenProjects:', err.code, err.message); onErr?.(err); }
+  onValue(
+    ref(rtdb, `users/${uid}/projects`),
+    snap => {
+      const val = snap.val()
+      const ps = val
+        ? Object.entries(val).map(([id, d]) => ({ id, ...d }))
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        : []
+      cb(ps)
+    },
+    err => { console.error('listenProjects:', err); onErr?.(err) }
   )
 
-export const createProject = (uid, data) =>
-  addDoc(projectsCol(uid), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+export const createProject = async (uid, data) => {
+  const r = push(ref(rtdb, `users/${uid}/projects`))
+  await set(r, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+  return r
+}
 
 export const updateProject = (uid, projectId, data) =>
-  updateDoc(doc(db, 'users', uid, 'projects', projectId), { ...data, updatedAt: serverTimestamp() })
+  update(ref(rtdb, `users/${uid}/projects/${projectId}`), { ...data, updatedAt: serverTimestamp() })
 
 export const deleteProject = (uid, projectId) =>
-  deleteDoc(doc(db, 'users', uid, 'projects', projectId))
+  remove(ref(rtdb, `users/${uid}/projects/${projectId}`))
 
-// ── NOTES / CALENDAR ──────────────────────────────────────────────────────────
-export const notesCol = (uid) => collection(db, 'users', uid, 'notes')
-
+// ── NOTES / CALENDAR ─────────────────────────────────────────────────────────
 export const listenNotes = (uid, cb) =>
-  onSnapshot(
-    collection(db, 'users', uid, 'notes'),
-    snap => cb(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||'').localeCompare(b.date||''))),
-    err => console.error('listenNotes:', err.code)
+  onValue(
+    ref(rtdb, `users/${uid}/notes`),
+    snap => {
+      const val = snap.val()
+      const notes = val
+        ? Object.entries(val).map(([id, d]) => ({ id, ...d }))
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+        : []
+      cb(notes)
+    },
+    err => console.error('listenNotes:', err)
   )
 
-export const createNote = (uid, data) =>
-  addDoc(notesCol(uid), { ...data, createdAt: serverTimestamp() })
+export const createNote = async (uid, data) => {
+  const r = push(ref(rtdb, `users/${uid}/notes`))
+  await set(r, { ...data, createdAt: serverTimestamp() })
+  return r
+}
 
 export const deleteNote = (uid, noteId) =>
-  deleteDoc(doc(db, 'users', uid, 'notes', noteId))
+  remove(ref(rtdb, `users/${uid}/notes/${noteId}`))
 
 // ── REMINDERS ─────────────────────────────────────────────────────────────────
-export const remindersCol = (uid) => collection(db, 'users', uid, 'reminders')
-
 export const listenReminders = (uid, cb) =>
-  onSnapshot(
-    collection(db, 'users', uid, 'reminders'),
-    snap => cb(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.date||'').localeCompare(b.date||''))),
-    err => console.error('listenReminders:', err.code)
+  onValue(
+    ref(rtdb, `users/${uid}/reminders`),
+    snap => {
+      const val = snap.val()
+      const reminders = val
+        ? Object.entries(val).map(([id, d]) => ({ id, ...d }))
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+        : []
+      cb(reminders)
+    },
+    err => console.error('listenReminders:', err)
   )
 
-export const createReminder = (uid, data) =>
-  addDoc(remindersCol(uid), { ...data, createdAt: serverTimestamp() })
+export const createReminder = async (uid, data) => {
+  const r = push(ref(rtdb, `users/${uid}/reminders`))
+  await set(r, { ...data, createdAt: serverTimestamp() })
+  return r
+}
 
 export const updateReminder = (uid, remId, data) =>
-  updateDoc(doc(db, 'users', uid, 'reminders', remId), data)
+  update(ref(rtdb, `users/${uid}/reminders/${remId}`), data)
 
 export const deleteReminder = (uid, remId) =>
-  deleteDoc(doc(db, 'users', uid, 'reminders', remId))
+  remove(ref(rtdb, `users/${uid}/reminders/${remId}`))
 
 // ── USER PROFILE ──────────────────────────────────────────────────────────────
 export const getUserProfile = async (uid) => {
-  const snap = await getDoc(doc(db, 'users', uid, 'profile', 'main'))
-  return snap.exists() ? snap.data() : {}
+  const snap = await get(ref(rtdb, `users/${uid}/profile`))
+  return snap.val() || {}
 }
 
 export const saveUserProfile = (uid, data) =>
-  setDoc(doc(db, 'users', uid, 'profile', 'main'), data, { merge: true })
+  update(ref(rtdb, `users/${uid}/profile`), data)
 
 // ── CHAT MESSAGES ─────────────────────────────────────────────────────────────
-export const messagesCol = (uid, projectId, channel='general') =>
-  collection(db, 'users', uid, 'projects', projectId, 'channels', channel, 'messages')
-
-export const listenMessages = (uid, projectId, channel='general', cb) =>
-  onSnapshot(
-    query(messagesCol(uid, projectId, channel), orderBy('createdAt', 'asc')),
-    snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+export const listenMessages = (uid, projectId, channel = 'general', cb) =>
+  onValue(
+    ref(rtdb, `users/${uid}/projects/${projectId}/channels/${channel}/messages`),
+    snap => {
+      const val = snap.val()
+      const msgs = val
+        ? Object.entries(val).map(([id, d]) => ({ id, ...d }))
+            .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+        : []
+      cb(msgs)
+    }
   )
 
-export const sendMessage = (uid, projectId, channel='general', data) =>
-  addDoc(messagesCol(uid, projectId, channel), { ...data, createdAt: serverTimestamp() })
+export const sendMessage = async (uid, projectId, channel = 'general', data) => {
+  const r = push(ref(rtdb, `users/${uid}/projects/${projectId}/channels/${channel}/messages`))
+  await set(r, { ...data, createdAt: serverTimestamp() })
+  return r
+}
 
-export const deleteMessage = (uid, projectId, channel='general', msgId) =>
-  deleteDoc(doc(db, 'users', uid, 'projects', projectId, 'channels', channel, 'messages', msgId))
+export const deleteMessage = (uid, projectId, channel = 'general', msgId) =>
+  remove(ref(rtdb, `users/${uid}/projects/${projectId}/channels/${channel}/messages/${msgId}`))
 
 // ── PROJECT MEMBERS ───────────────────────────────────────────────────────────
-export const membersCol = (uid, projectId) =>
-  collection(db, 'users', uid, 'projects', projectId, 'members')
-
 export const listenMembers = (uid, projectId, cb) =>
-  onSnapshot(membersCol(uid, projectId), snap =>
-    cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+  onValue(
+    ref(rtdb, `users/${uid}/projects/${projectId}/members`),
+    snap => {
+      const val = snap.val()
+      cb(val ? Object.entries(val).map(([id, d]) => ({ id, ...d })) : [])
+    }
+  )
 
-export const addMember = (uid, projectId, data) =>
-  addDoc(membersCol(uid, projectId), { ...data, addedAt: serverTimestamp() })
+export const addMember = async (uid, projectId, data) => {
+  const r = push(ref(rtdb, `users/${uid}/projects/${projectId}/members`))
+  await set(r, { ...data, addedAt: serverTimestamp() })
+  return r
+}
 
 export const removeMember = (uid, projectId, memberId) =>
-  deleteDoc(doc(db, 'users', uid, 'projects', projectId, 'members', memberId))
+  remove(ref(rtdb, `users/${uid}/projects/${projectId}/members/${memberId}`))
 
 // ── ACCESS CONTROL ────────────────────────────────────────────────────────────
-const accessRef = doc(db, 'settings', 'accessControl')
-
 export const checkAccess = async (email) => {
-  const snap = await getDoc(accessRef)
+  const snap = await get(ref(rtdb, 'settings/accessControl'))
   if (!snap.exists()) return 'first_user'
-  const { approvedEmails = [] } = snap.data()
-  return approvedEmails.includes(email) ? 'approved' : 'not_approved'
+  const { approvedEmails } = snap.val()
+  return toArr(approvedEmails).includes(email) ? 'approved' : 'not_approved'
 }
 
 export const initAccessControl = (ownerEmail) =>
-  setDoc(accessRef, { approvedEmails: [ownerEmail], ownerEmail }, { merge: true })
+  update(ref(rtdb, 'settings/accessControl'), {
+    approvedEmails: [ownerEmail],
+    ownerEmail
+  })
 
 export const requestAccess = (email, name) =>
-  setDoc(doc(db, 'accessRequests', email.replace(/[@.]/g, '_')), {
+  set(ref(rtdb, `accessRequests/${email.replace(/[@.]/g, '_')}`), {
     email, name, requestedAt: serverTimestamp(), status: 'pending'
   })
 
 export const approveAccess = async (email) => {
-  await updateDoc(accessRef, { approvedEmails: arrayUnion(email) })
-  await updateDoc(doc(db, 'accessRequests', email.replace(/[@.]/g, '_')), { status: 'approved' })
+  const snap = await get(ref(rtdb, 'settings/accessControl'))
+  const current = snap.val() || {}
+  const existing = toArr(current.approvedEmails)
+  if (!existing.includes(email)) {
+    await update(ref(rtdb, 'settings/accessControl'), {
+      approvedEmails: [...existing, email]
+    })
+  }
+  await update(ref(rtdb, `accessRequests/${email.replace(/[@.]/g, '_')}`), { status: 'approved' })
 }
 
 export const rejectAccess = (email) =>
-  updateDoc(doc(db, 'accessRequests', email.replace(/[@.]/g, '_')), { status: 'rejected' })
+  update(ref(rtdb, `accessRequests/${email.replace(/[@.]/g, '_')}`), { status: 'rejected' })
 
 export const getOwnerEmail = async () => {
-  const snap = await getDoc(accessRef)
-  return snap.exists() ? (snap.data().ownerEmail || null) : null
+  const snap = await get(ref(rtdb, 'settings/accessControl'))
+  return snap.exists() ? (snap.val().ownerEmail || null) : null
 }
 
 export const listenPendingRequests = (cb) =>
-  onSnapshot(query(collection(db, 'accessRequests'), where('status', '==', 'pending')), snap =>
-    cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+  onValue(
+    ref(rtdb, 'accessRequests'),
+    snap => {
+      const val = snap.val()
+      const reqs = val
+        ? Object.entries(val)
+            .map(([id, d]) => ({ id, ...d }))
+            .filter(r => r.status === 'pending')
+        : []
+      cb(reqs)
+    }
+  )
 
 export const listenApprovedUsers = (cb) =>
-  onSnapshot(query(collection(db, 'accessRequests'), where('status', '==', 'approved')), snap =>
-    cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+  onValue(
+    ref(rtdb, 'accessRequests'),
+    snap => {
+      const val = snap.val()
+      const reqs = val
+        ? Object.entries(val)
+            .map(([id, d]) => ({ id, ...d }))
+            .filter(r => r.status === 'approved')
+        : []
+      cb(reqs)
+    }
+  )
 
 // ── SHARE LINKS ───────────────────────────────────────────────────────────────
 export const createShareLink = async (ownerUid, projectId, config, projectSnapshot) => {
-  const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
-  await setDoc(doc(db, 'sharedProjects', token), {
+  const r = push(ref(rtdb, 'sharedProjects'))
+  await set(r, {
     ownerUid, projectId, config,
     project: projectSnapshot,
     createdAt: serverTimestamp()
   })
-  return token
+  return r.key
 }
 
 export const getSharedProject = async (token) => {
-  const snap = await getDoc(doc(db, 'sharedProjects', token))
+  const snap = await get(ref(rtdb, `sharedProjects/${token}`))
   if (!snap.exists()) return null
-  const { project, config } = snap.data()
+  const { project, config } = snap.val()
   if (!project) return null
   return { project, config }
 }
 
 export const deleteShareLink = (token) =>
-  deleteDoc(doc(db, 'sharedProjects', token))
+  remove(ref(rtdb, `sharedProjects/${token}`))

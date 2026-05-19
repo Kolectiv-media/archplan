@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
-import { getFirestore, enableNetwork, disableNetwork } from 'firebase/firestore'
+import { getDatabase } from 'firebase/database'
 import { getStorage } from 'firebase/storage'
 
 const firebaseConfig = {
@@ -10,18 +10,15 @@ const firebaseConfig = {
   storageBucket: "archplan-kolectiv.firebasestorage.app",
   messagingSenderId: "808417198301",
   appId: "1:808417198301:web:96d692121a9d460b761b34",
-  measurementId: "G-KSRQ3K2TEF"
+  measurementId: "G-KSRQ3K2TEF",
+  databaseURL: "https://archplan-kolectiv-default-rtdb.firebaseio.com"
 }
 
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
-export const db = getFirestore(app)
+export const rtdb = getDatabase(app)
 export const storage = getStorage(app)
 export const googleProvider = new GoogleAuthProvider()
 export const messaging = null
 export async function requestPushPermission() { return null }
 export function onPushMessage() { return () => {} }
-
-export async function forceFirestoreSync() {
-  try { await disableNetwork(db); await enableNetwork(db) } catch(e) {}
-}

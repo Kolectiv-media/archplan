@@ -5,15 +5,13 @@ import {
   Download, Upload, Link2, ExternalLink, X, Calendar, Map, Settings,
   PanelLeftClose, PanelLeftOpen, LogOut, MessageSquare, Send, Paperclip,
   AtSign, Hash, Users, UserPlus, Trash2, CheckSquare, Zap, Flame,
-  Droplets, Radio, Leaf, ChevronDown, MoreVertical, Lock, RefreshCw
+  Droplets, Radio, Leaf, ChevronDown, MoreVertical, Lock
 } from "lucide-react";
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote } from './lib/db.js'
+import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote, listenConnected } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail } from './lib/emailService.js'
-import { forceFirestoreSync, db } from './lib/firebase.js'
-import { getDoc, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
 const DARK = {
@@ -610,7 +608,7 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[]})=>{
   useEffect(()=>{
     if (!user) return;
     const unsub = listenMessages(user.uid, project.id, channel, (msgs)=>{
-      setMessages(msgs.map(m=>({...m, ts: m.createdAt?.toDate?.() ?? m.ts})));
+      setMessages(msgs.map(m=>({...m, ts: m.createdAt ? new Date(m.createdAt) : m.ts})));
     });
     return unsub;
   },[user, project.id, channel]);
@@ -1837,68 +1835,48 @@ export default function App(){
 
   const [projectsReady,setProjectsReady]=useState(false);
   const [projectsError,setProjectsError]=useState(null);
-  const [projectsFromCache,setProjectsFromCache]=useState(false);
   const [lastSyncTime,setLastSyncTime]=useState(null);
-  const projectsReadyRef=useRef(false);
-  const projectsFromCacheRef=useRef(true);
   useEffect(()=>{
     if(!user){
       setProjects([]);setProjectsReady(false);setProjectsError(null);
-      setProjectsFromCache(false);projectsReadyRef.current=false;projectsFromCacheRef.current=true;
       return;
     }
-    // 1. Show localStorage cache instantly — projects appear before network
+    // Show localStorage cache instantly while RTDB connects
     const cached=loadProjectCache(user.uid);
-    if(cached.length){
-      setProjects(cached);setProjectsReady(true);setProjectsFromCache(true);
-    } else {
-      setProjectsReady(false);setProjectsError(null);
-      setProjectsFromCache(false);projectsReadyRef.current=false;
-    }
-    // 2. Firestore real-time listener — overwrites cache with live server data
+    if(cached.length){ setProjects(cached);setProjectsReady(true); }
+    // RTDB real-time listener — always live server data, no "fromCache" concept
     const migrationState = { tried: false, failed: false }
     const unsub=listenProjects(
       user.uid,
-      async (ps,fromCache)=>{
-        // Ignore initial empty cache snapshot (IndexedDB or memory) before server responds
-        if(fromCache && ps.length===0) return;
-
-        // Server confirmed empty but localStorage has projects → migrate them up
-        if(!fromCache && ps.length===0 && !migrationState.tried) {
-          const cached = loadProjectCache(user.uid);
-          if(cached.length > 0) {
+      async (ps)=>{
+        // Server empty but localStorage has projects → migrate them up once
+        if(ps.length===0 && !migrationState.tried) {
+          const local = loadProjectCache(user.uid);
+          if(local.length > 0) {
             migrationState.tried = true;
-            showToast(`Se urcă ${cached.length} proiect(e) pe server…`, T.amber);
+            showToast(`Se urcă ${local.length} proiect(e) pe server…`, T.amber);
             try {
               await Promise.all(
-                cached.map(({ id: _id, createdAt: _ca, updatedAt: _ua, ...data }) =>
+                local.map(({ id: _id, createdAt: _ca, updatedAt: _ua, ...data }) =>
                   createProject(user.uid, data)
                 )
               );
-              showToast(`${cached.length} proiect(e) sincronizate ✓`, T.green);
+              showToast(`${local.length} proiect(e) sincronizate ✓`, T.green);
             } catch(e) {
               migrationState.failed = true;
               showToast(`Eroare sincronizare: ${e.code||e.message}`, T.red);
-              setProjects(cached);setProjectsReady(true);setProjectsFromCache(true);
+              setProjects(local); setProjectsReady(true);
             }
             return;
           }
         }
-
-        // Never wipe display with empty server response if migration failed or
-        // if we still have localStorage data (guard against transient empty snapshots)
-        if(ps.length===0 && (migrationState.failed || loadProjectCache(user.uid).length > 0)) return;
-
-        setProjects(ps);setProjectsReady(true);setProjectsError(null);
-        setProjectsFromCache(fromCache);projectsReadyRef.current=true;projectsFromCacheRef.current=fromCache;
-        if(!fromCache){ saveProjectCache(user.uid,ps);setLastSyncTime(new Date()); }
+        if(ps.length===0 && migrationState.failed) return;
+        setProjects(ps); setProjectsReady(true); setProjectsError(null);
+        saveProjectCache(user.uid, ps); setLastSyncTime(new Date());
       },
       (err)=>{setProjectsError(err.code||err.message);}
     );
-    // 3. Try reconnect at 10s, then every 20s while still in cache mode
-    const t1=setTimeout(()=>{ if(projectsFromCacheRef.current) forceFirestoreSync(); },10000);
-    const t2=setInterval(()=>{ if(projectsFromCacheRef.current) forceFirestoreSync(); },20000);
-    return ()=>{ unsub(); clearTimeout(t1); clearInterval(t2); projectsReadyRef.current=false;projectsFromCacheRef.current=true; };
+    return ()=>{ unsub(); };
   },[user]);
 
   // Auto-save to localStorage on every project change (covers all mutations)
@@ -1924,67 +1902,17 @@ export default function App(){
     if(tab==='chat'&&selId) setChatSeenProjects(s=>new Set([...s,selId]))
   },[tab,selId])
 
-  // Track Firestore online/offline state
-  const [fsOnline, setFsOnline] = useState(true)
+  // Track browser online state and RTDB connection
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [rtdbConnected, setRtdbConnected] = useState(false)
   useEffect(()=>{
-    const onOnline=()=>setFsOnline(true);
-    const onOffline=()=>setFsOnline(false);
+    const onOnline=()=>setIsOnline(true);
+    const onOffline=()=>setIsOnline(false);
     window.addEventListener('online',onOnline);
     window.addEventListener('offline',onOffline);
-    setFsOnline(navigator.onLine);
     return()=>{window.removeEventListener('online',onOnline);window.removeEventListener('offline',onOffline);};
   },[])
-
-  // Firestore probe — uses REST API directly so it waits for real server response
-  const [fsProbeResult, setFsProbeResult] = useState(null)
-  const [fetchProbe, setFetchProbe] = useState(null)
-  useEffect(()=>{
-    if(!user) return;
-    setFsProbeResult(null); setFetchProbe(null);
-    const probe = async () => {
-      try {
-        const token = await user.getIdToken(true)
-        const base = `https://firestore.googleapis.com/v1/projects/archplan-kolectiv/databases/(default)/documents`
-        const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-        // Test read
-        const r = await fetch(`${base}/settings/accessControl`, { headers: h })
-        if(!r.ok && r.status !== 404){ const t=await r.text(); throw new Error(t.match(/"message":"([^"]+)"/)?.[1]||`read HTTP ${r.status}`) }
-        setFetchProbe('ok')
-        // Test write → real server round-trip
-        const w = await fetch(`${base}/users/${user.uid}/_probe?documentId=conn`, {
-          method:'POST', headers:h,
-          body: JSON.stringify({ fields:{ ts:{ integerValue: String(Date.now()) } } })
-        })
-        if(!w.ok){ const t=await w.text(); throw new Error(t.match(/"message":"([^"]+)"/)?.[1]||`write HTTP ${w.status}`) }
-        // Clean up probe doc
-        fetch(`${base}/users/${user.uid}/_probe/conn`, { method:'DELETE', headers:h }).catch(()=>{})
-        setFsProbeResult('ok')
-      } catch(e) {
-        if(!fetchProbe) setFetchProbe('err')
-        setFsProbeResult(e.message?.slice(0,80)||'error')
-      }
-    }
-    probe()
-  },[user])
-
-  // Clear all local Firebase cache and localStorage
-  const handleClearLocalCache = async () => {
-    try {
-      localStorage.removeItem(projCacheKey(user?.uid))
-      const dbs = await indexedDB.databases?.() || []
-      await Promise.all(
-        dbs.filter(d=>d.name?.toLowerCase().includes('firestore')||d.name?.toLowerCase().includes('firebase'))
-           .map(d=>new Promise(res=>{ const r=indexedDB.deleteDatabase(d.name); r.onsuccess=res; r.onerror=res; }))
-      )
-    } catch(e) { console.warn('clearCache:', e) }
-    window.location.reload()
-  }
-
-  useEffect(()=>{
-    const onVisible=()=>{ if(document.visibilityState==='visible') forceFirestoreSync() }
-    document.addEventListener('visibilitychange',onVisible)
-    return()=>document.removeEventListener('visibilitychange',onVisible)
-  },[])
+  useEffect(()=>listenConnected(setRtdbConnected),[]);
 
   useEffect(()=>{
     if(!user) return;
@@ -2320,11 +2248,6 @@ export default function App(){
             <span style={{position:'absolute',top:-4,right:-4,width:8,height:8,borderRadius:'50%',background:T.red}}/>
           </button>
         )}
-        {/* User account indicator — visible email so cross-device account mismatch is obvious */}
-        <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 8px',background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,maxWidth:180,overflow:'hidden'}}>
-          <div style={{width:6,height:6,borderRadius:'50%',background:T.green,flexShrink:0}}/>
-          <span style={{fontSize:10,color:T.textMd,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:'monospace'}}>{user?.email||'—'}</span>
-        </div>
         {/* User avatar */}
         <div style={{position:"relative",flexShrink:0}}>
           <div onClick={e=>{e.stopPropagation();setUMenu(s=>!s);}} style={{cursor:"pointer"}}>
@@ -2368,11 +2291,7 @@ export default function App(){
                 <button onClick={()=>{setUMenu(false);setShowChangePinModal(true);}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.textMd,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}>
                   <Lock size={13}/>Schimbă PIN financiar
                 </button>
-                <button onClick={()=>{setUMenu(false);handleClearLocalCache();}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.amber,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}
-                  title="Șterge cache-ul local și resincronizează de pe server">
-                  <RefreshCw size={13}/>Resetează cache local
-                </button>
-                <button onClick={()=>{setUMenu(false);logout();}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.red,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}>
+<button onClick={()=>{setUMenu(false);logout();}} style={{width:"100%",background:"transparent",border:"none",padding:"8px 12px",color:T.red,cursor:"pointer",fontSize:12,textAlign:"left",borderRadius:7,fontFamily:"inherit",display:"flex",alignItems:"center",gap:7}}>
                   <LogOut size={13}/>Deconectare
                 </button>
               </div>
@@ -2745,50 +2664,19 @@ export default function App(){
         <div style={{height:12,width:1,background:T.border}}/>
         <span style={{fontSize:10,color:T.textDim}}>Arhitectură · Urbanism · Design</span>
         <div style={{marginLeft:"auto",display:"flex",gap:14,alignItems:"center"}}>
-          {/* Firestore sync indicator */}
-          <div style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer'}} onClick={()=>forceFirestoreSync()}
-            title={`Click pentru a forța sincronizarea\nCont: ${user?.email||'—'}\nUID: ${user?.uid||'—'}\nUltima sincronizare: ${lastSyncTime?lastSyncTime.toLocaleTimeString('ro-RO'):'niciodată'}`}>
+          {/* RTDB sync indicator */}
+          <div style={{display:'flex',alignItems:'center',gap:4}}
+            title={`Ultima sincronizare: ${lastSyncTime?lastSyncTime.toLocaleTimeString('ro-RO'):'niciodată'}\nUID: ${user?.uid||'—'}`}>
             <div style={{width:6,height:6,borderRadius:'50%',flexShrink:0,
-              background:!fsOnline?T.red:projectsReady&&!projectsFromCache?T.green:T.amber,
-              animation:projectsFromCache&&projectsReady?'pulse 1.5s ease infinite':undefined}}/>
+              background:!isOnline?T.red:rtdbConnected&&projectsReady?T.green:T.amber,
+              animation:(!rtdbConnected||!projectsReady)&&isOnline?'pulse 1.5s ease infinite':undefined}}/>
             <span style={{fontSize:10,fontWeight:600,
-              color:!fsOnline?T.red:projectsReady&&!projectsFromCache?T.green:T.amber}}>
-              {!fsOnline?'Offline':projectsReady&&!projectsFromCache
+              color:!isOnline?T.red:rtdbConnected&&projectsReady?T.green:T.amber}}>
+              {!isOnline?'Offline':rtdbConnected&&projectsReady
                 ?`Sincronizat ${lastSyncTime?lastSyncTime.toLocaleTimeString('ro-RO',{hour:'2-digit',minute:'2-digit'}):''}`.trim()
-                :'Sincronizare…'}
+                :'Conectare…'}
             </span>
-            {user&&<span style={{fontSize:9,color:T.textDim,fontFamily:'monospace',marginLeft:2}}>({user.email?.split('@')[0]})</span>}
           </div>
-          {(fetchProbe||fsProbeResult)&&(
-            <>
-              <div style={{height:10,width:1,background:T.border}}/>
-              <span style={{fontSize:10,fontWeight:600,
-                color:fetchProbe==='ok'&&fsProbeResult==='ok'?T.green:T.red,
-                maxWidth:320,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-                title={`HTTP probe: ${fetchProbe} | Auth probe: ${fsProbeResult}`}>
-                {fetchProbe==='blocked'?'⚠ firestore.googleapis.com blocat'
-                  :fetchProbe==='ok'&&fsProbeResult==='ok'?'✓ Firebase OK'
-                  :fetchProbe==='ok'&&fsProbeResult?`⚠ Auth: ${fsProbeResult}`
-                  :`⚠ ${fetchProbe||''} ${fsProbeResult||''}`}
-              </span>
-            </>
-          )}
-          {user&&fetchProbe==='ok'&&fsProbeResult==='ok'&&projectsFromCache&&(
-            <>
-              <div style={{height:10,width:1,background:T.border}}/>
-              <button onClick={async()=>{
-                const cached=loadProjectCache(user.uid);
-                if(!cached.length){showToast('Nu există proiecte locale de urcat',T.amber);return;}
-                showToast(`Se urcă ${cached.length} proiect(e)…`,T.amber);
-                try{
-                  await Promise.all(cached.map(({id:_i,createdAt:_c,updatedAt:_u,...d})=>createProject(user.uid,d)));
-                  showToast(`${cached.length} proiect(e) urcate ✓`,T.green);
-                }catch(e){showToast(`Eroare: ${e.code||e.message}`,T.red);}
-              }} style={{background:'transparent',border:`1px solid ${T.amber}`,borderRadius:4,padding:'2px 8px',color:T.amber,cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:600}}>
-                ↑ Urcă local pe server
-              </button>
-            </>
-          )}
           <div style={{height:10,width:1,background:T.border}}/>
           <span style={{fontSize:10,color:T.textDim,fontFamily:'monospace'}}>v{__BUILD_DATE__}</span>
           <a href="https://www.studiokolectiv.ro" target="_blank" rel="noreferrer" style={{fontSize:10,color:T.blue,textDecoration:"none",fontWeight:500}}>studiokolectiv.ro</a>
