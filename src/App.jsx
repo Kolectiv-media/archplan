@@ -1935,30 +1935,39 @@ export default function App(){
     return()=>{window.removeEventListener('online',onOnline);window.removeEventListener('offline',onOffline);};
   },[])
 
-  // Firestore read+write probe — runs once after login to confirm both work
-  const [fsProbeResult, setFsProbeResult] = useState(null) // null|'ok'|string
+  // Firestore probe — uses REST API directly so it waits for real server response
+  const [fsProbeResult, setFsProbeResult] = useState(null)
   const [fetchProbe, setFetchProbe] = useState(null)
   useEffect(()=>{
     if(!user) return;
     setFsProbeResult(null); setFetchProbe(null);
-    fetch('https://firestore.googleapis.com/v1/projects/archplan-kolectiv/databases')
-      .then(r=>setFetchProbe(r.status===401||r.status===403||r.ok?'ok':`http-${r.status}`))
-      .catch(()=>setFetchProbe('blocked'))
     const probe = async () => {
       try {
-        // Test write: write then delete a probe document under the user's own path
-        const testRef = doc(db, 'users', user.uid, '_probe', 'test')
-        await setDoc(testRef, { ts: serverTimestamp() })
-        await deleteDoc(testRef)
+        const token = await user.getIdToken(true)
+        const base = `https://firestore.googleapis.com/v1/projects/archplan-kolectiv/databases/(default)/documents`
+        const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+        // Test read
+        const r = await fetch(`${base}/settings/accessControl`, { headers: h })
+        if(!r.ok && r.status !== 404){ const t=await r.text(); throw new Error(t.match(/"message":"([^"]+)"/)?.[1]||`read HTTP ${r.status}`) }
+        setFetchProbe('ok')
+        // Test write → real server round-trip
+        const w = await fetch(`${base}/users/${user.uid}/_probe?documentId=conn`, {
+          method:'POST', headers:h,
+          body: JSON.stringify({ fields:{ ts:{ integerValue: String(Date.now()) } } })
+        })
+        if(!w.ok){ const t=await w.text(); throw new Error(t.match(/"message":"([^"]+)"/)?.[1]||`write HTTP ${w.status}`) }
+        // Clean up probe doc
+        fetch(`${base}/users/${user.uid}/_probe/conn`, { method:'DELETE', headers:h }).catch(()=>{})
         setFsProbeResult('ok')
       } catch(e) {
-        setFsProbeResult(e.code || e.message || 'unknown')
+        if(!fetchProbe) setFetchProbe('err')
+        setFsProbeResult(e.message?.slice(0,80)||'error')
       }
     }
     probe()
   },[user])
 
-  // Clear all local Firebase cache and localStorage — nuclear reset for stale data
+  // Clear all local Firebase cache and localStorage
   const handleClearLocalCache = async () => {
     try {
       localStorage.removeItem(projCacheKey(user?.uid))
