@@ -1908,17 +1908,28 @@ export default function App(){
     return()=>{window.removeEventListener('online',onOnline);window.removeEventListener('offline',onOffline);};
   },[])
 
-  // Firestore server connectivity probe — runs once after login
+  // Firestore connectivity probe using REST API — bypasses SDK to test raw HTTP
   const [fsProbeResult, setFsProbeResult] = useState(null) // null | 'ok' | string(error)
   useEffect(()=>{
     if(!user) return;
     setFsProbeResult(null);
     const probe = async () => {
       try {
-        await getDoc(doc(db, 'settings', 'accessControl'))
-        setFsProbeResult('ok')
+        const token = await user.getIdToken()
+        const resp = await fetch(
+          `https://firestore.googleapis.com/v1/projects/archplan-kolectiv/databases/(default)/documents/settings/accessControl`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+        if(resp.ok || resp.status===404) {
+          setFsProbeResult('ok') // reachable — 404 = doc doesn't exist yet, that's fine
+        } else {
+          const txt = await resp.text().catch(()=>'')
+          const msg = txt.match(/"message":"([^"]+)"/)?.[1] || `HTTP ${resp.status}`
+          setFsProbeResult(msg.slice(0,80))
+        }
       } catch(e) {
-        setFsProbeResult(e.code || e.message || 'unknown-error')
+        // Network-level failure — Firebase servers unreachable
+        setFsProbeResult(`net: ${e.message?.slice(0,60)||'fetch failed'}`)
       }
     }
     probe()
@@ -2702,8 +2713,9 @@ export default function App(){
           {fsProbeResult&&fsProbeResult!=='ok'&&(
             <>
               <div style={{height:10,width:1,background:T.border}}/>
-              <span style={{fontSize:10,fontWeight:600,color:T.red}} title="Eroare conectare Firebase — vezi detalii">
-                ⚠ Firebase: {fsProbeResult}
+              <span style={{fontSize:10,fontWeight:600,color:T.red,maxWidth:300,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                title={`Eroare Firebase REST: ${fsProbeResult}`}>
+                ⚠ {fsProbeResult}
               </span>
             </>
           )}
