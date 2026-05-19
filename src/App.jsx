@@ -1085,9 +1085,13 @@ const PhasesView=({project,onUpdate,T})=>{
 };
 
 /* ─── AVIZE VIEW ─────────────────────────────────────────────────────────────── */
-const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
+const mkAvizFromInst=(inst)=>({avizId:uid()+'_'+inst.id,instId:inst.id,status:'pending',steps:[{stepId:uid(),name:'Depunere documentație',status:'pending',date:null},{stepId:uid(),name:'Obținere aviz',status:'pending',date:null}],submissionDate:null,estimatedDate:null,emissionDate:null,expiryDate:null,dosarNr:'',attachments:[]});
+const mkCustomAviz=(name)=>({avizId:uid()+'_cust',instId:'custom_'+uid(),customName:name,status:'pending',steps:[{stepId:uid(),name:'Depunere documentație',status:'pending',date:null},{stepId:uid(),name:'Obținere aviz',status:'pending',date:null}],submissionDate:null,estimatedDate:null,emissionDate:null,expiryDate:null,dosarNr:'',attachments:[]});
+const AvizeView=({project,onUpdate,onAddAviz,onRemoveAviz,T,autoOpenAviz})=>{
   const [open,setOpen]=useState(null);
   const [statusMenu,setStatusMenu]=useState(null);
+  const [showAdd,setShowAdd]=useState(false);
+  const [customName,setCustomName]=useState('');
   useEffect(()=>{if(autoOpenAviz) setOpen(autoOpenAviz);},[autoOpenAviz]);
   useEffect(()=>{
     if(!statusMenu) return;
@@ -1096,10 +1100,11 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
     return()=>document.removeEventListener('click',close);
   },[statusMenu]);
   const avizStatusInfo=(s)=>AVIZ_STATUSES.find(x=>x.id===s)||{label:'De obținut',color:'#484f58'};
+  const availableInst=INST.filter(i=>!project.avize.some(av=>av.instId===i.id));
   return(
     <div style={{display:"flex",flexDirection:"column",gap:6}}>
       {project.avize.map(av=>{
-        const inst=INST.find(i=>i.id===av.instId);if(!inst)return null;
+        const inst=INST.find(i=>i.id===av.instId)||{name:av.customName||'Aviz',short:(av.customName||'Aviz').slice(0,4),Icon:FileText,color:'#8b949e',validity:12,info:''};
         const ds=av.steps.filter(s=>s.status==="approved").length;
         const pv=Math.round(ds/av.steps.length*100);
         const isOpen=open===av.avizId;
@@ -1107,11 +1112,21 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
         return(
           <div key={av.avizId} style={{border:`1px solid ${isApproved?T.green+'44':isOpen?inst.color+'44':T.border}`,borderRadius:10,background:T.panel,transition:"border-color .2s"}}>
             <div onClick={()=>setOpen(isOpen?null:av.avizId)}
-              style={{display:"grid",gridTemplateColumns:"36px 1fr 120px 90px 150px 28px",gap:8,alignItems:"center",padding:"11px 16px",cursor:"pointer"}}
+              style={{display:"grid",gridTemplateColumns:"22px 32px 1fr 90px 150px 28px",gap:8,alignItems:"center",padding:"11px 16px",cursor:"pointer"}}
               onMouseEnter={e=>e.currentTarget.style.background=T.panelHov}
               onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <div style={{width:32,height:32,borderRadius:8,background:`${isApproved?T.green:inst.color}18`,border:`1px solid ${isApproved?T.green:inst.color}30`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                {isApproved?<CheckCircle size={16} color={T.green}/>:<inst.Icon size={16} color={inst.color}/>}
+              {/* Checkmark complete button */}
+              <div
+                onClick={e=>{e.stopPropagation();const done=isApproved;const upd={status:done?'pending':'approved'};if(!done&&!av.emissionDate)upd.emissionDate=TODAY;if(done)upd.emissionDate=null;onUpdate(av.avizId,upd);}}
+                title={isApproved?'Marchează ca neobținut':'Marchează ca obținut'}
+                style={{width:18,height:18,borderRadius:'50%',flexShrink:0,cursor:'pointer',border:`2px solid ${isApproved?T.green:T.borderLt}`,background:isApproved?T.green:'transparent',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s'}}
+                onMouseEnter={e=>{if(!isApproved){e.currentTarget.style.borderColor=T.green;e.currentTarget.style.background=T.greenBg;}}}
+                onMouseLeave={e=>{if(!isApproved){e.currentTarget.style.borderColor=T.borderLt;e.currentTarget.style.background='transparent';}}}
+              >
+                {isApproved&&<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              <div style={{width:28,height:28,borderRadius:7,background:`${isApproved?T.green:inst.color}18`,border:`1px solid ${isApproved?T.green:inst.color}30`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {isApproved?<CheckCircle size={13} color={T.green}/>:<inst.Icon size={13} color={inst.color}/>}
               </div>
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:T.text}}>{inst.name}</div>
@@ -1121,8 +1136,7 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
                   {av.emissionDate&&<Chip label={`Emis ${av.emissionDate}`} color={T.green} T={T}/>}
                 </div>
               </div>
-              <MiniProg val={pv} color={isApproved?T.green:inst.color} w={70} T={T}/>
-              <span style={{fontSize:11,color:T.textDim}}>{ds}/{av.steps.length} pași</span>
+              <MiniProg val={pv} color={isApproved?T.green:inst.color} w={60} T={T}/>
               {/* Multi-state status dropdown */}
               <div onClick={e=>e.stopPropagation()} style={{position:'relative',display:'flex',alignItems:'center'}}>
                 <button onClick={()=>setStatusMenu(statusMenu===av.avizId?null:av.avizId)} style={{
@@ -1244,11 +1258,54 @@ const AvizeView=({project,onUpdate,T,autoOpenAviz})=>{
                     </div>
                   );
                 })}
+                {/* Remove aviz */}
+                <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}`,display:'flex',justifyContent:'flex-end'}}>
+                  <button onClick={()=>onRemoveAviz(av.avizId)}
+                    style={{background:'transparent',border:`1px solid ${T.red}44`,borderRadius:6,padding:'4px 12px',color:T.red,cursor:'pointer',fontSize:11,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,opacity:.7}}
+                    onMouseEnter={e=>e.currentTarget.style.opacity='1'} onMouseLeave={e=>e.currentTarget.style.opacity='.7'}>
+                    <Trash2 size={11}/>Elimină aviz din proiect
+                  </button>
+                </div>
               </div>
             )}
           </div>
         );
       })}
+      {/* Add aviz panel */}
+      {!showAdd?(
+        <button onClick={()=>setShowAdd(true)} style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:`1px dashed ${T.borderLt}`,borderRadius:9,padding:'9px 16px',color:T.textDim,cursor:'pointer',fontSize:12,fontFamily:'inherit',width:'100%',marginTop:2}}>
+          <Plus size={13}/> Adaugă aviz nou
+        </button>
+      ):(
+        <div style={{border:`1px solid ${T.border}`,borderRadius:10,padding:'14px 16px',background:T.panel}}>
+          <div style={{fontSize:11,fontWeight:600,color:T.textDim,textTransform:'uppercase',letterSpacing:.7,marginBottom:10}}>Avize disponibile</div>
+          {availableInst.length>0?(
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:14}}>
+              {availableInst.map(i=>(
+                <button key={i.id} onClick={()=>{onAddAviz(mkAvizFromInst(i));setShowAdd(false);}}
+                  style={{display:'flex',alignItems:'center',gap:5,background:`${i.color}12`,border:`1px solid ${i.color}33`,borderRadius:6,padding:'5px 10px',color:i.color,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:'inherit'}}>
+                  <i.Icon size={11}/>{i.short}
+                </button>
+              ))}
+            </div>
+          ):(
+            <div style={{fontSize:11,color:T.textDim,marginBottom:14}}>Toate avizele predefinite sunt deja adăugate.</div>
+          )}
+          <div style={{fontSize:10,color:T.textDim,marginBottom:6,textTransform:'uppercase',letterSpacing:.5}}>Aviz personalizat</div>
+          <div style={{display:'flex',gap:6}}>
+            <input value={customName} onChange={e=>setCustomName(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&customName.trim()&&(onAddAviz(mkCustomAviz(customName.trim())),setCustomName(''),setShowAdd(false))}
+              placeholder="ex: Aviz ISU, ANIF, CJ…"
+              style={{flex:1,background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:7,padding:'7px 10px',color:T.text,fontSize:12,outline:'none',fontFamily:'inherit'}}/>
+            <button onClick={()=>{if(customName.trim()){onAddAviz(mkCustomAviz(customName.trim()));setCustomName('');setShowAdd(false);}}}
+              disabled={!customName.trim()}
+              style={{background:T.accent,border:'none',borderRadius:7,padding:'7px 14px',color:'#fff',fontWeight:600,cursor:'pointer',fontSize:12,fontFamily:'inherit',opacity:customName.trim()?1:.5}}>
+              Adaugă
+            </button>
+          </div>
+          <button onClick={()=>{setShowAdd(false);setCustomName('');}} style={{marginTop:8,background:'transparent',border:'none',color:T.textDim,fontSize:11,cursor:'pointer',fontFamily:'inherit'}}>Anulează</button>
+        </div>
+      )}
     </div>
   );
 };
@@ -2041,6 +2098,25 @@ export default function App(){
     });
   };
 
+  const addAviz=(projId,newAviz)=>{
+    const proj=allProjects.find(p=>p.id===projId);
+    if(!proj||!user) return;
+    const newAvize=[...(proj.avize||[]),newAviz];
+    const ownerUid=proj._isCollab?proj.ownerUid:user.uid;
+    if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize}));
+    else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize}));
+    updateProject(ownerUid,projId,{avize:newAvize}).catch(()=>showToast('Eroare salvare aviz',T.red));
+  };
+  const removeAviz=(projId,avizId)=>{
+    const proj=allProjects.find(p=>p.id===projId);
+    if(!proj||!user) return;
+    const newAvize=(proj.avize||[]).filter(av=>av.avizId!==avizId);
+    const ownerUid=proj._isCollab?proj.ownerUid:user.uid;
+    if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize}));
+    else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize}));
+    updateProject(ownerUid,projId,{avize:newAvize}).catch(()=>showToast('Eroare salvare aviz',T.red));
+  };
+
   const handleInvite=async()=>{
     if(!inviteEmail.trim()||!sel||!user) return;
     setInviteLoading(true);
@@ -2699,7 +2775,7 @@ export default function App(){
               </div>
 
               {tab==="faze"&&<PhasesView project={sel} onUpdate={(phId,data)=>updPhase(sel.id,phId,data)} T={T}/>}
-              {tab==="avize"&&<AvizeView project={sel} onUpdate={(avId,data)=>updAviz(sel.id,avId,data)} T={T} autoOpenAviz={autoOpenAviz}/>}
+              {tab==="avize"&&<AvizeView project={sel} onUpdate={(avId,data)=>updAviz(sel.id,avId,data)} onAddAviz={(av)=>addAviz(sel.id,av)} onRemoveAviz={(avId)=>removeAviz(sel.id,avId)} T={T} autoOpenAviz={autoOpenAviz}/>}
               {tab==="gantt"&&(
                 <div style={{background:T.panel,borderRadius:10,padding:20,border:`1px solid ${T.border}`}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
