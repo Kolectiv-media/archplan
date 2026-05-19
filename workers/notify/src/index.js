@@ -269,55 +269,53 @@ export default {
 
     const appUrl = env.APP_URL || 'https://app.studiokolectiv.ro'
 
-    let sgBody
+    const fromAddress = env.FROM_EMAIL
+      ? `ArchPlan <${env.FROM_EMAIL}>`
+      : 'ArchPlan <onboarding@resend.dev>'
+
+    let emailBody
     if (type === 'invitation') {
       if (!toEmail) return json({ error: 'toEmail lipsă' }, 400)
-      sgBody = {
-        to:      [{ email: toEmail }],
-        from:    { email: `notifications@${COMPANY.site}`, name: `ArchPlan — ${COMPANY.name}` },
-        subject: `${escHtml(inviterName || inviterEmail)} te-a invitat pe ArchPlan — ${escHtml(projectName)}`,
-        content: [
-          { type: 'text/html',  value: buildInvitationEmailHtml({ inviterName: inviterName || inviterEmail, projectName, appUrl }) },
-          { type: 'text/plain', value: `${inviterName || inviterEmail} te-a invitat să colaborezi pe proiectul "${projectName}" în ArchPlan.\n\nDeschide aplicația și acceptă invitația: ${appUrl}` },
-        ],
+      emailBody = {
+        from:    fromAddress,
+        to:      [toEmail],
+        subject: `${inviterName || inviterEmail} te-a invitat pe ArchPlan — ${projectName}`,
+        html:    buildInvitationEmailHtml({ inviterName: inviterName || inviterEmail, projectName, appUrl }),
+        text:    `${inviterName || inviterEmail} te-a invitat să colaborezi pe proiectul "${projectName}" în ArchPlan.\n\nDeschide aplicația și acceptă invitația: ${appUrl}`,
       }
     } else if (type === 'access_request') {
       const adminEmail = env.ADMIN_EMAIL || 'marketing.kolectiv@gmail.com'
-      sgBody = {
-        to:      [{ email: adminEmail }],
-        from:    { email: `notifications@${COMPANY.site}`, name: `ArchPlan — ${COMPANY.name}` },
+      emailBody = {
+        from:    fromAddress,
+        to:      [adminEmail],
         subject: `Cerere acces ArchPlan — ${requesterName || requesterEmail}`,
-        content: [
-          { type: 'text/html',  value: buildAccessRequestEmailHtml({ requesterName: requesterName || requesterEmail, requesterEmail, appUrl }) },
-          { type: 'text/plain', value: `Cerere nouă de acces în ArchPlan.\n\nNume: ${requesterName || requesterEmail}\nEmail: ${requesterEmail}\n\nIntră în aplicație pentru a aproba sau respinge cererea: ${appUrl}` },
-        ],
+        html:    buildAccessRequestEmailHtml({ requesterName: requesterName || requesterEmail, requesterEmail, appUrl }),
+        text:    `Cerere nouă de acces în ArchPlan.\n\nNume: ${requesterName || requesterEmail}\nEmail: ${requesterEmail}\n\nIntră în aplicație pentru a aproba sau respinge cererea: ${appUrl}`,
       }
     } else {
       if (!toEmail) return json({ error: 'toEmail lipsă' }, 400)
       const chanLabel = CHANNEL_LABELS[channel] || channel
-      sgBody = {
-        to:      [{ email: toEmail }],
-        from:    { email: `notifications@${COMPANY.site}`, name: `ArchPlan — ${COMPANY.name}` },
+      emailBody = {
+        from:    fromAddress,
+        to:      [toEmail],
         subject: `@${toName} — ai fost menționat în ${projectName}`,
-        content: [
-          { type: 'text/html',  value: buildEmailHtml({ mentionedBy, projectName, channel, messageText, appUrl }) },
-          { type: 'text/plain', value: `Ai fost menționat în ${projectName} (#${chanLabel}) de ${mentionedBy}:\n\n"${messageText}"\n\nDeschide ArchPlan: ${appUrl}` },
-        ],
+        html:    buildEmailHtml({ mentionedBy, projectName, channel, messageText, appUrl }),
+        text:    `Ai fost menționat în ${projectName} (#${chanLabel}) de ${mentionedBy}:\n\n"${messageText}"\n\nDeschide ArchPlan: ${appUrl}`,
       }
     }
 
-    const sgRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    const resendRes = await fetch('https://api.resend.com/emails', {
       method:  'POST',
       headers: {
-        Authorization:  `Bearer ${env.SENDGRID_API_KEY}`,
+        Authorization:  `Bearer ${env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(sgBody),
+      body: JSON.stringify(emailBody),
     })
 
-    if (!sgRes.ok) {
-      const errText = await sgRes.text()
-      return json({ error: 'SendGrid error: ' + errText }, 500)
+    if (!resendRes.ok) {
+      const errText = await resendRes.text()
+      return json({ error: 'Resend error: ' + errText }, 500)
     }
 
     return json({ success: true })
