@@ -1829,6 +1829,11 @@ const AvizeDashboard = ({projects, T, onNavigate}) => {
 }
 
 /* ─── MAIN APP ───────────────────────────────────────────────────────────────── */
+const slugify = (str) =>
+  String(str).toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'proiect'
+
 export default function App(){
   const { user, loading, logout } = useAuth();
   const [accessStatus, setAccessStatus] = useState('approved')
@@ -1848,9 +1853,9 @@ export default function App(){
   const navigate = useNavigate()
   const location = useLocation()
   const _pp = location.pathname.split('/').filter(Boolean)
-  const selId = _pp[0]==='p' && _pp[1] ? _pp[1] : null
+  const _rawKey = _pp[0]==='p' && _pp[1] ? _pp[1] : null
   const VALID_TABS = new Set(['faze','avize','gantt','chat','contract'])
-  const tab = (selId && _pp[2] && VALID_TABS.has(_pp[2])) ? _pp[2] : 'faze'
+  const tab = (_rawKey && _pp[2] && VALID_TABS.has(_pp[2])) ? _pp[2] : 'faze'
 
   const [projects,setProjects]=useState([]);
   const [showRem,setShowRem]=useState(false);
@@ -1875,6 +1880,11 @@ export default function App(){
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteTargetProj, setDeleteTargetProj] = useState(null)
   const [collabProjects, setCollabProjects] = useState([])
+  const _allPRes = [...projects, ...collabProjects]
+  const selId = _rawKey
+    ? (_allPRes.find(p => p.slug === _rawKey || p.id === _rawKey)?.id || _rawKey)
+    : null
+
   const [myInvitations, setMyInvitations] = useState([])
   const [projMembers, setProjMembers] = useState([])
   const [showInviteModal, setShowInviteModal] = useState(false)
@@ -1896,12 +1906,16 @@ export default function App(){
     setPinModal({onSuccess:()=>{setAdminUnlocked(true);setPinModal(null);onSuccess();},hint});
   };
 
+  const _urlKey = (projId) => {
+    const p = [...projects, ...collabProjects].find(x => x.id === projId)
+    return p?.slug || projId
+  }
   const navTo = (projId, t='faze', avizId=null) => {
-    navigate(projId ? `/p/${projId}/${t}` : '/')
+    navigate(projId ? `/p/${_urlKey(projId)}/${t}` : '/')
     setShowRem(false)
     if(avizId) setAutoOpenAviz(avizId); else setAutoOpenAviz(null)
   }
-  const switchTab = (t) => { if(selId) navigate(`/p/${selId}/${t}`) }
+  const switchTab = (t) => { if(selId) navigate(`/p/${_urlKey(selId)}/${t}`) }
 
   const [projectsReady,setProjectsReady]=useState(false);
   const [projectsError,setProjectsError]=useState(null);
@@ -2139,8 +2153,14 @@ export default function App(){
     if(!newProjName.trim()||!user) return;
     const start=newProjStart||TODAY;
     const projName=newProjName.trim();
+    const baseSlug = slugify(projName)
+    const existingSlugs = new Set([...projects, ...collabProjects].map(p => p.slug).filter(Boolean))
+    let slug = baseSlug
+    let suffix = 2
+    while(existingSlugs.has(slug)) { slug = `${baseSlug}-${suffix++}` }
     const newProj={
       name:projName,
+      slug,
       client:newProjClient.trim(),
       location:newProjLoc.trim(),
       startDate:start,
