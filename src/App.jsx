@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Bell, Plus, Search, ChevronRight, AlertTriangle, CheckCircle, Clock,
   Circle, FileText, AlertCircle, Layers, Building2, BarChart2, User,
@@ -1844,9 +1845,14 @@ export default function App(){
     role: 'owner',
   } : null;
 
+  const navigate = useNavigate()
+  const location = useLocation()
+  const _pp = location.pathname.split('/').filter(Boolean)
+  const selId = _pp[0]==='p' && _pp[1] ? _pp[1] : null
+  const VALID_TABS = new Set(['faze','avize','gantt','chat','contract'])
+  const tab = (selId && _pp[2] && VALID_TABS.has(_pp[2])) ? _pp[2] : 'faze'
+
   const [projects,setProjects]=useState([]);
-  const [selId,setSelId]=useState(null);
-  const [tab,setTab]=useState("faze");
   const [showRem,setShowRem]=useState(false);
   const [search,setSearch]=useState("");
   const [coll,setColl]=useState(false);
@@ -1890,22 +1896,12 @@ export default function App(){
     setPinModal({onSuccess:()=>{setAdminUnlocked(true);setPinModal(null);onSuccess();},hint});
   };
 
-  // Browser back/forward support
-  useEffect(()=>{
-    const onPop=(e)=>{
-      const s=e.state;
-      if(s?.selId){setSelId(s.selId);setTab(s.tab||'faze');}
-      else{setSelId(null);}
-    };
-    window.addEventListener('popstate',onPop);
-    return()=>window.removeEventListener('popstate',onPop);
-  },[]);
-
-  const navTo=(projId,t='faze',avizId=null)=>{
-    history.pushState({selId:projId,tab:t},'');
-    setSelId(projId);setTab(t);setShowRem(false);
-    if(avizId){setAutoOpenAviz(avizId);}else{setAutoOpenAviz(null);}
-  };
+  const navTo = (projId, t='faze', avizId=null) => {
+    navigate(projId ? `/p/${projId}/${t}` : '/')
+    setShowRem(false)
+    if(avizId) setAutoOpenAviz(avizId); else setAutoOpenAviz(null)
+  }
+  const switchTab = (t) => { if(selId) navigate(`/p/${selId}/${t}`) }
 
   const [projectsReady,setProjectsReady]=useState(false);
   const [projectsError,setProjectsError]=useState(null);
@@ -2186,7 +2182,7 @@ export default function App(){
   const handleDeleteProject = async () => {
     if(!deleteTargetProj||!user) return
     await deleteProject(user.uid, deleteTargetProj.id)
-    if(selId === deleteTargetProj.id) setSelId(null)
+    if(selId === deleteTargetProj.id) navigate('/')
     setShowDeleteConfirm(false)
     setDeleteTargetProj(null)
     showToast('Proiect șters', T.red)
@@ -2252,7 +2248,7 @@ export default function App(){
     textarea{scrollbar-width:thin;}
   `;
 
-  const urlShare = new URLSearchParams(window.location.search).get('share')
+  const urlShare = new URLSearchParams(location.search).get('share') || (_pp[0]==='share' ? _pp[1] : null)
   if(urlShare) return <SharedView token={urlShare}/>
 
   if(loading) return(
@@ -2291,7 +2287,7 @@ export default function App(){
 
       {/* ── TOP BAR ── */}
       <header style={{height:46,background:T.sidebar,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 16px",gap:10,flexShrink:0,zIndex:20}}>
-        <button onClick={()=>{setSelId(null);setShowRem(false);}} style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,background:"none",border:"none",cursor:"pointer",padding:0}}>
+        <button onClick={()=>{navigate('/');setShowRem(false);}} style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,background:"none",border:"none",cursor:"pointer",padding:0}}>
           <div style={{width:26,height:26,borderRadius:7,background:`linear-gradient(135deg,${T.accent},${T.purple})`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 2px 8px ${T.accent}44`}}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           </div>
@@ -2301,7 +2297,7 @@ export default function App(){
         <div style={{flex:1,display:"flex",alignItems:"center",gap:4,minWidth:0,overflowX:'auto'}}>
           {sel&&!showRem ? (
             <>
-              <button onClick={()=>{history.pushState(null,'');setSelId(null);setShowRem(false);}}
+              <button onClick={()=>{navigate('/');setShowRem(false);}}
                 style={{display:'flex',alignItems:'center',gap:4,background:T.accentBg,border:`1px solid ${T.accent}33`,borderRadius:6,padding:'3px 9px',cursor:"pointer",fontSize:11,color:T.accent,fontFamily:"inherit",flexShrink:0,fontWeight:600}}>
                 ← Proiecte
               </button>
@@ -2310,7 +2306,7 @@ export default function App(){
             </>
           ) : showRem ? (
             <>
-              <button onClick={()=>{setSelId(null);setShowRem(false);}} style={{background:"none",border:"none",padding:0,cursor:"pointer",fontSize:12,color:T.textDim,fontFamily:"inherit",flexShrink:0}}>Proiecte</button>
+              <button onClick={()=>{navigate('/');setShowRem(false);}} style={{background:"none",border:"none",padding:0,cursor:"pointer",fontSize:12,color:T.textDim,fontFamily:"inherit",flexShrink:0}}>Proiecte</button>
               <ChevronRight size={12} color={T.textDim}/>
               <span style={{fontSize:12,color:T.text,fontWeight:500}}>Remindere</span>
             </>
@@ -2370,7 +2366,7 @@ export default function App(){
             )}
           </div>
         )}
-        <button onClick={()=>{if(sel){setTab('chat')}else{showToast('Selectează un proiect pentru chat',T.amber)}}}
+        <button onClick={()=>{if(sel){switchTab('chat')}else{showToast('Selectează un proiect pentru chat',T.amber)}}}
           style={{display:"flex",alignItems:"center",justifyContent:"center",position:'relative',background:sel&&tab==='chat'?T.accentBg:"transparent",border:`1px solid ${sel&&tab==='chat'?T.accent:T.border}`,borderRadius:7,width:32,height:32,color:sel&&tab==='chat'?T.accent:T.textMd,cursor:"pointer"}}
           title="Chat proiect">
           <MessageSquare size={14}/>
@@ -2773,7 +2769,7 @@ export default function App(){
                   </div>
                   <div style={{display:"flex",background:T.sidebar,borderRadius:8,padding:3,border:`1px solid ${T.border}`,gap:2}}>
                     {TABS.map(t=>(
-                      <button key={t.id} onClick={()=>t.locked?requirePin(()=>setTab(t.id),`Tabul "${t.label}" este protejat.`):setTab(t.id)}
+                      <button key={t.id} onClick={()=>t.locked?requirePin(()=>switchTab(t.id),`Tabul "${t.label}" este protejat.`):switchTab(t.id)}
                         style={{display:"flex",alignItems:"center",gap:5,background:tab===t.id?T.panel:"transparent",border:`1px solid ${tab===t.id?T.border:"transparent"}`,borderRadius:6,padding:"5px 11px",color:tab===t.id?T.text:T.textDim,cursor:"pointer",fontSize:11,fontWeight:tab===t.id?600:400,fontFamily:"inherit",transition:"all .12s"}}>
                         {t.locked&&!adminUnlocked?<Lock size={11}/>:<t.I size={12}/>}{t.label}
                         {t.id==="chat"&&<span style={{width:6,height:6,borderRadius:"50%",background:T.accent,display:"block"}}/>}
