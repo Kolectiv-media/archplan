@@ -11,7 +11,7 @@ import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
 import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, listenCollabProjects } from './lib/db.js'
-import { sendMentionEmail, sendAccessRequestEmail } from './lib/emailService.js'
+import { sendMentionEmail, sendAccessRequestEmail, sendInvitationEmail } from './lib/emailService.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
 const DARK = {
@@ -2120,13 +2120,21 @@ export default function App(){
   const handleInvite=async()=>{
     if(!inviteEmail.trim()||!sel||!user) return;
     setInviteLoading(true);
+    const email=inviteEmail.trim().toLowerCase();
     try{
-      await inviteToProject(user.uid,sel.id,sel.name,user.email,inviteEmail.trim().toLowerCase());
-      showToast(`Invitație trimisă către ${inviteEmail.trim()}`,T.green);
+      await inviteToProject(user.uid,sel.id,sel.name,user.email,email);
+      sendInvitationEmail({
+        toEmail:email,
+        inviterName:user.displayName||user.email.split('@')[0],
+        inviterEmail:user.email,
+        projectName:sel.name
+      });
+      showToast(`Invitație trimisă către ${email}`,T.green);
       setInviteEmail('');
       setShowInviteModal(false);
     }catch(e){
-      showToast('Eroare la trimiterea invitației',T.red);
+      console.error('invite error:',e);
+      showToast(`Eroare: ${e.code==='PERMISSION_DENIED'?'Actualizează regulile RTDB (vezi instrucțiuni)':e.message||'necunoscut'}`,T.red);
     }
     setInviteLoading(false);
   };

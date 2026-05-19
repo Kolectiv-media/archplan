@@ -35,6 +35,22 @@ export async function sendAccessRequestEmail({ requesterName, requesterEmail }) 
   }
 }
 
+export async function sendInvitationEmail({ toEmail, inviterName, inviterEmail, projectName }) {
+  if (!WORKER_URL) return
+  try {
+    const user = getAuth().currentUser
+    if (!user) return
+    const token = await user.getIdToken()
+    await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ type: 'invitation', toEmail, inviterName, inviterEmail, projectName }),
+    })
+  } catch (err) {
+    console.warn('Invitation email failed (non-critical):', err.message)
+  }
+}
+
 export async function sendMentionEmail(params) {
   if (!WORKER_URL) return
 
