@@ -11,7 +11,7 @@ import {
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, revokeAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, removeProjectMember, listenCollabProjects } from './lib/db.js'
+import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, revokeAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, removeProjectMember, listenCollabProjects, getOrCreateClientToken, syncPublicProject } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail, sendInvitationEmail } from './lib/emailService.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
@@ -460,13 +460,12 @@ const SharedView = ({ token }) => {
         setData({ project: { name: decoded.n, client: decoded.c, location: decoded.l, startDate: decoded.s, phases: decoded.ph||[], avize: decoded.av||[], type: decoded.t||'arhitectura', clientNote: decoded.note||'' }, config: decoded.cfg || {faze:true,avize:true} })
       } catch(e) { setErr(true) }
     } else {
-      // Short token = Firestore stored share — retry up to 3 times
-      const tryLoad=(attempt=0)=>{
-        getSharedProject(token)
-          .then(r=>{ if(r) setData(r); else if(attempt<2) setTimeout(()=>tryLoad(attempt+1),1500); else setErr('Link invalid sau expirat.'); })
-          .catch(e=>{ if(attempt<2) setTimeout(()=>tryLoad(attempt+1),1500); else setErr(`Eroare: ${e.code||e.message||'necunoscut'}`); });
-      };
-      tryLoad();
+      // Short token = RTDB permanent share — real-time listener
+      const unsub = listenSharedProject(token, r => {
+        if (r) setData(r)
+        else setErr('Link invalid sau expirat.')
+      })
+      return unsub
     }
   }, [token])
 

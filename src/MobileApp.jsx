@@ -4,7 +4,7 @@ import {
   Layers, Building2, User, ArrowLeft, MoreVertical, Plus, Search,
   Send, Check, X, ChevronRight, LogOut, Sun, Moon, Monitor,
   CheckCircle, Clock, Circle, AlertCircle, FileText, Trash2,
-  UserPlus, Users, Bell
+  UserPlus, Users, Bell, CalendarDays, Share2, BarChart2
 } from 'lucide-react'
 import { useAuth } from './hooks/useAuth.jsx'
 import { useTheme } from './hooks/useTheme.jsx'
@@ -16,7 +16,8 @@ import {
   listenPendingRequests, listenApprovedUsers, listenConnected,
   listenMyInvitations, acceptInvitation, declineInvitation,
   listenProjectMembers, listenCollabProjects,
-  approveAccess, rejectAccess, revokeAccess
+  approveAccess, rejectAccess, revokeAccess,
+  getOrCreateClientToken
 } from './lib/db.js'
 import { sendMentionEmail } from './lib/emailService.js'
 
@@ -449,12 +450,19 @@ function FazeTab({ project, ownerUid, T, toast }) {
 // ── AvizeTab ──────────────────────────────────────────────────────────────────
 function AvizeTab({ project, ownerUid, T, toast }) {
   const avize = Array.isArray(project.avize) ? project.avize : []
+  const [expandedId, setExpandedId] = useState(null)
 
-  const cycleStatus = async (av) => {
+  const cycleStatus = async (e, av) => {
+    e.stopPropagation()
     const next = cycleAvizStatus(av.status)
     const updated = avize.map(a => a.avizId === av.avizId ? { ...a, status: next } : a)
     await updateProject(ownerUid, project.id, { avize: updated })
     toast(`${av.institution || av.instId}: ${avizMeta(next).label}`)
+  }
+
+  const updateField = async (avizId, field, value) => {
+    const updated = avize.map(a => a.avizId === avizId ? { ...a, [field]: value } : a)
+    await updateProject(ownerUid, project.id, { avize: updated })
   }
 
   return (
@@ -467,25 +475,53 @@ function AvizeTab({ project, ownerUid, T, toast }) {
       {avize.map(av => {
         const meta = avizMeta(av.status)
         const name = av.institution || av.instId || 'Aviz'
+        const isExpanded = expandedId === av.avizId
         return (
-          <div key={av.avizId || av.instId} style={{
-            display: 'flex', alignItems: 'center', gap: 12,
-            padding: '12px 0', borderBottom: `1px solid ${T.border}`
-          }}>
-            <div style={{ width: 36, height: 36, borderRadius: 8, background: meta.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Building2 size={16} color={meta.color} />
+          <div key={av.avizId || av.instId} style={{ borderBottom: `1px solid ${T.border}` }}>
+            <div
+              onClick={() => setExpandedId(isExpanded ? null : av.avizId)}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', cursor: 'pointer' }}
+            >
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: meta.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Building2 size={16} color={meta.color} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                {(av.submissionDate || av.emissionDate) && (
+                  <div style={{ fontSize: 11, color: T.textDim }}>
+                    {av.submissionDate && `Dep: ${fmtS(av.submissionDate)}`}
+                    {av.submissionDate && av.emissionDate && ' · '}
+                    {av.emissionDate && `Emis: ${fmtS(av.emissionDate)}`}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Chip label={meta.label} color={meta.color} onClick={e => cycleStatus(e, av)} small />
+                <ChevronRight size={16} color={T.textDim} style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform .2s', flexShrink: 0 }} />
+              </div>
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-              {(av.submissionDate || av.emissionDate) && (
-                <div style={{ fontSize: 11, color: T.textDim }}>
-                  {av.submissionDate && `Dep: ${fmtS(av.submissionDate)}`}
-                  {av.submissionDate && av.emissionDate && ' · '}
-                  {av.emissionDate && `Emis: ${fmtS(av.emissionDate)}`}
-                </div>
-              )}
-            </div>
-            <Chip label={meta.label} color={meta.color} onClick={() => cycleStatus(av)} small />
+            {isExpanded && (
+              <div style={{ paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[
+                  { k: 'dosarNr', label: 'Nr. dosar', type: 'text', placeholder: 'ex. 1234/2025' },
+                  { k: 'submissionDate', label: 'Data depunere', type: 'date' },
+                  { k: 'estimatedDate', label: 'Data estimată emitere', type: 'date' },
+                  { k: 'emissionDate', label: 'Data emitere', type: 'date' },
+                  { k: 'expiryDate', label: 'Data expirare', type: 'date' },
+                ].map(({ k, label, type, placeholder }) => (
+                  <div key={k}>
+                    <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>{label}</div>
+                    <input
+                      type={type}
+                      value={av[k] || ''}
+                      placeholder={placeholder || ''}
+                      onChange={e => updateField(av.avizId, k, e.target.value)}
+                      style={inp(T)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )
       })}
@@ -496,12 +532,19 @@ function AvizeTab({ project, ownerUid, T, toast }) {
 // ── SpecialitatiTab ───────────────────────────────────────────────────────────
 function SpecialitatiTab({ project, ownerUid, T, toast }) {
   const specs = Array.isArray(project.specialitati) ? project.specialitati : []
+  const [expandedId, setExpandedId] = useState(null)
 
-  const cycleStatus = async (sp) => {
+  const cycleStatus = async (e, sp) => {
+    e.stopPropagation()
     const next = cycleSpecStatus(sp.status || 'pending')
     const updated = specs.map(s => s.specId === sp.specId ? { ...s, status: next } : s)
     await updateProject(ownerUid, project.id, { specialitati: updated })
     toast(`${sp.customName || sp.typeId}: ${SPEC_LABELS[next]}`)
+  }
+
+  const updateField = async (specId, field, value) => {
+    const updated = specs.map(s => s.specId === specId ? { ...s, [field]: value } : s)
+    await updateProject(ownerUid, project.id, { specialitati: updated })
   }
 
   if (specs.length === 0) {
@@ -519,17 +562,57 @@ function SpecialitatiTab({ project, ownerUid, T, toast }) {
         const color = type?.color || '#8b949e'
         const label = sp.customName || type?.label || sp.typeId
         const status = sp.status || 'pending'
+        const isExpanded = expandedId === sp.specId
         return (
-          <div key={sp.specId} style={{
-            display: 'flex', alignItems: 'center', gap: 12,
-            padding: '12px 0', borderBottom: `1px solid ${T.border}`
-          }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 2 }}>{label}</div>
-              {sp.responsible && <div style={{ fontSize: 11, color: T.textDim }}>{sp.responsible}</div>}
+          <div key={sp.specId} style={{ borderBottom: `1px solid ${T.border}` }}>
+            <div
+              onClick={() => setExpandedId(isExpanded ? null : sp.specId)}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', cursor: 'pointer' }}
+            >
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 2 }}>{label}</div>
+                {sp.responsible && <div style={{ fontSize: 11, color: T.textDim }}>{sp.responsible}</div>}
+                {sp.dueDate && <div style={{ fontSize: 11, color: T.textDim }}>Termen: {fmtS(sp.dueDate)}</div>}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Chip label={SPEC_LABELS[status]} color={SPEC_COLORS[status]} onClick={e => cycleStatus(e, sp)} small />
+                <ChevronRight size={16} color={T.textDim} style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform .2s', flexShrink: 0 }} />
+              </div>
             </div>
-            <Chip label={SPEC_LABELS[status]} color={SPEC_COLORS[status]} onClick={() => cycleStatus(sp)} small />
+            {isExpanded && (
+              <div style={{ paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>Responsabil</div>
+                  <input
+                    type="text"
+                    value={sp.responsible || ''}
+                    placeholder="Nume responsabil"
+                    onChange={e => updateField(sp.specId, 'responsible', e.target.value)}
+                    style={inp(T)}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>Termen</div>
+                  <input
+                    type="date"
+                    value={sp.dueDate || ''}
+                    onChange={e => updateField(sp.specId, 'dueDate', e.target.value)}
+                    style={inp(T)}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>Note</div>
+                  <textarea
+                    value={sp.notes || ''}
+                    placeholder="Note…"
+                    rows={3}
+                    onChange={e => updateField(sp.specId, 'notes', e.target.value)}
+                    style={{ ...inp(T), resize: 'vertical' }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )
       })}
@@ -674,6 +757,7 @@ function ChatTab({ project, ownerUid, user, T, toast }) {
 function ProjectDetail({ project, user, T, toast, onBack }) {
   const [tab, setTab] = useState('faze')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [shareLoading, setShareLoading] = useState(false)
 
   const ownerUid = project._isCollab ? project.ownerUid : user.uid
   const phases = Array.isArray(project.phases) ? project.phases : []
@@ -711,9 +795,31 @@ function ProjectDetail({ project, user, T, toast, onBack }) {
             {menuOpen && (
               <div style={{
                 position: 'absolute', right: 0, top: '100%', background: T.panel, border: `1px solid ${T.border}`,
-                borderRadius: 10, boxShadow: T.shadow, zIndex: 50, minWidth: 140, overflow: 'hidden'
+                borderRadius: 10, boxShadow: T.shadow, zIndex: 50, minWidth: 160, overflow: 'hidden'
               }}>
-                <button onClick={() => setMenuOpen(false)} style={{ display: 'block', width: '100%', padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', color: T.text, fontSize: 13, textAlign: 'left', fontFamily: 'inherit' }}>Editează</button>
+                <button
+                  onClick={async () => {
+                    setMenuOpen(false)
+                    setShareLoading(true)
+                    try {
+                      const token = await getOrCreateClientToken(ownerUid, project.id, project)
+                      const url = `${window.location.origin}?share=${token}`
+                      if (navigator.clipboard) {
+                        await navigator.clipboard.writeText(url)
+                        toast('Link client copiat!')
+                      } else {
+                        toast(`Link: ${url}`)
+                      }
+                    } catch {
+                      toast('Eroare la generare link')
+                    }
+                    setShareLoading(false)
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', color: T.text, fontSize: 13, textAlign: 'left', fontFamily: 'inherit' }}
+                >
+                  <Share2 size={14} color={T.accent} />
+                  {shareLoading ? 'Se generează…' : 'Link client'}
+                </button>
               </div>
             )}
           </div>
@@ -753,57 +859,175 @@ function ProjectDetail({ project, user, T, toast, onBack }) {
   )
 }
 
-// ── GlobalAvize ───────────────────────────────────────────────────────────────
-function GlobalAvize({ projects, collabProjects, T }) {
-  const allProjects = [...projects, ...collabProjects]
+// ── TodayScreen ───────────────────────────────────────────────────────────────
+function TodayScreen({ projects, collabProjects, T, onSelectProject }) {
+  const [ganttProjectId, setGanttProjectId] = useState(null)
+  const allProjects = [...projects, ...collabProjects.map(p => ({ ...p, _isCollab: true }))]
 
-  const grouped = allProjects
-    .map(p => ({
-      project: p,
-      avize: Array.isArray(p.avize) ? p.avize : [],
-    }))
-    .filter(g => g.avize.length > 0)
+  // Collect phases due today or overdue (not approved)
+  const NEXT_7 = addDays(TODAY, 7)
+  const dueSoon = []
+  allProjects.forEach(p => {
+    const phases = Array.isArray(p.phases) ? p.phases : []
+    phases.forEach(ph => {
+      if (ph.status === 'approved') return
+      if (!ph.endDate) return
+      if (ph.endDate < TODAY || ph.endDate <= NEXT_7) {
+        dueSoon.push({ ...ph, projectName: p.name, project: p, overdue: ph.endDate < TODAY })
+      }
+    })
+  })
+  dueSoon.sort((a, b) => (a.endDate || '').localeCompare(b.endDate || ''))
 
-  if (grouped.length === 0) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textDim, fontSize: 14 }}>
-        Niciun aviz în niciun proiect
-      </div>
-    )
-  }
+  // Gantt
+  const ganttProj = ganttProjectId ? allProjects.find(p => p.id === ganttProjectId) : null
+  const ganttPhases = ganttProj ? (Array.isArray(ganttProj.phases) ? ganttProj.phases : []) : []
+  const ganttStart = ganttPhases.length ? ganttPhases.reduce((m, ph) => ph.startDate && ph.startDate < m ? ph.startDate : m, ganttPhases[0].startDate || TODAY) : TODAY
+  const ganttEnd = ganttPhases.length ? ganttPhases.reduce((m, ph) => ph.endDate && ph.endDate > m ? ph.endDate : m, ganttPhases[0].endDate || TODAY) : TODAY
+  const ganttTotalDays = Math.max(diffD(ganttStart, ganttEnd), 1)
+  const groups = ganttPhases.length ? Array.from(new Set(ganttPhases.map(ph => ph.group).filter(Boolean))) : []
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
-      {grouped.map(({ project: p, avize }) => (
-        <div key={p.id} style={{ marginBottom: 8 }}>
-          <div style={{ padding: '10px 16px 6px', background: T.sidebar, borderBottom: `1px solid ${T.border}` }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>{p.name}</div>
-            {p.client && <div style={{ fontSize: 10, color: T.textDim }}>{p.client}</div>}
-          </div>
-          {avize.map(av => {
-            const meta = avizMeta(av.status)
-            const name = av.institution || av.instId || 'Aviz'
-            const expiring = av.expiryDate && diffD(TODAY, av.expiryDate) <= 30 && diffD(TODAY, av.expiryDate) > 0
-            return (
-              <div key={av.avizId || av.instId} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '10px 16px', borderBottom: `1px solid ${T.border}`
-              }}>
-                <div style={{ width: 32, height: 32, borderRadius: 6, background: meta.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Building2 size={14} color={meta.color} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{name}</div>
-                  {expiring && (
-                    <div style={{ fontSize: 11, color: T.amber }}>Expiră în {diffD(TODAY, av.expiryDate)} zile</div>
-                  )}
-                </div>
-                <Chip label={meta.label} color={meta.color} small />
-              </div>
-            )
-          })}
+
+      {/* ── Due soon ── */}
+      <div style={{ padding: '16px 16px 0' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>
+          Azi &amp; Săptămâna aceasta
         </div>
-      ))}
+        {dueSoon.length === 0 ? (
+          <div style={{ color: T.textDim, fontSize: 13, paddingBottom: 12 }}>Nicio fază scadentă în curând</div>
+        ) : (
+          dueSoon.slice(0, 12).map((ph, i) => (
+            <div
+              key={i}
+              onClick={() => onSelectProject(ph.project)}
+              style={{
+                display: 'flex', gap: 10, alignItems: 'center',
+                padding: '9px 0', borderBottom: `1px solid ${T.border}`, cursor: 'pointer'
+              }}
+            >
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: ph.overdue ? '#f85149' : (PHASE_COLORS[ph.status] || '#484f58'), flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: ph.overdue ? '#f85149' : T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ph.name}</div>
+                <div style={{ fontSize: 11, color: T.textDim }}>{ph.projectName}</div>
+              </div>
+              <div style={{ fontSize: 11, color: ph.overdue ? '#f85149' : T.textDim, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {ph.overdue ? 'Întârziat' : fmtS(ph.endDate)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* ── Project progress ── */}
+      <div style={{ padding: '20px 16px 0' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>
+          Evoluție proiecte
+        </div>
+        {allProjects.length === 0 ? (
+          <div style={{ color: T.textDim, fontSize: 13 }}>Niciun proiect</div>
+        ) : allProjects.map(p => {
+          const phases = Array.isArray(p.phases) ? p.phases : []
+          const pct = pctOf(phases)
+          const avize = Array.isArray(p.avize) ? p.avize : []
+          const specs = Array.isArray(p.specialitati) ? p.specialitati : []
+          const avizeDone = avize.filter(a => a.status === 'approved' || a.status === 'picked_up').length
+          const specsDone = specs.filter(s => s.status === 'done').length
+          const typeColor = projTypeColor(p.type)
+          return (
+            <div key={p.id} style={{
+              background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10,
+              padding: '12px 14px', marginBottom: 8, position: 'relative', overflow: 'hidden'
+            }}>
+              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: typeColor }} />
+              <div style={{ paddingLeft: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>{p.name}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                  <span style={{ fontSize: 10, color: T.textDim }}>Faze finalizate</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: pct === 100 ? '#3fb950' : T.accent }}>{pct}%</span>
+                </div>
+                <ProgressBar pct={pct} T={T} height={5} />
+                {(avize.length > 0 || specs.length > 0) && (
+                  <div style={{ display: 'flex', gap: 14, marginTop: 6 }}>
+                    {avize.length > 0 && (
+                      <div style={{ fontSize: 10, color: T.textDim }}>
+                        Avize <span style={{ color: T.text, fontWeight: 600 }}>{avizeDone}/{avize.length}</span>
+                      </div>
+                    )}
+                    {specs.length > 0 && (
+                      <div style={{ fontSize: 10, color: T.textDim }}>
+                        Specialități <span style={{ color: T.text, fontWeight: 600 }}>{specsDone}/{specs.length}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Gantt / Timeline ── */}
+      <div style={{ padding: '20px 16px 16px' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>
+          Timeline / Gantt
+        </div>
+        {/* Project selector */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          {allProjects.map(p => (
+            <button
+              key={p.id}
+              onClick={() => setGanttProjectId(p.id === ganttProjectId ? null : p.id)}
+              style={{
+                padding: '5px 12px', borderRadius: 20, fontSize: 11, fontFamily: 'inherit',
+                border: `1px solid ${ganttProjectId === p.id ? T.accent : T.border}`,
+                background: ganttProjectId === p.id ? T.accentBg : 'transparent',
+                color: ganttProjectId === p.id ? T.accent : T.textMd, cursor: 'pointer'
+              }}
+            >{p.name}</button>
+          ))}
+        </div>
+        {!ganttProj && (
+          <div style={{ color: T.textDim, fontSize: 13 }}>Selectează un proiect pentru a vedea timeline-ul</div>
+        )}
+        {ganttProj && ganttPhases.length > 0 && (
+          <div>
+            {groups.map(group => {
+              const gPhases = ganttPhases.filter(ph => ph.group === group)
+              return (
+                <div key={group} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{group}</div>
+                  {gPhases.map(ph => {
+                    const startOff = Math.max(diffD(ganttStart, ph.startDate || ganttStart), 0)
+                    const duration = Math.max(diffD(ph.startDate || ganttStart, ph.endDate || ganttEnd), 1)
+                    const leftPct = (startOff / ganttTotalDays) * 100
+                    const widthPct = Math.min((duration / ganttTotalDays) * 100, 100 - leftPct)
+                    const color = PHASE_COLORS[ph.status] || '#484f58'
+                    const todayPct = TODAY >= ganttStart && TODAY <= ganttEnd
+                      ? (diffD(ganttStart, TODAY) / ganttTotalDays) * 100 : null
+                    return (
+                      <div key={ph.phaseId} style={{ marginBottom: 5 }}>
+                        <div style={{ fontSize: 10, color: T.textMd, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ph.name}</div>
+                        <div style={{ height: 16, background: T.border, borderRadius: 3, position: 'relative', overflow: 'hidden' }}>
+                          <div style={{ position: 'absolute', left: `${leftPct}%`, width: `${widthPct}%`, height: '100%', background: color, borderRadius: 3, minWidth: 4, opacity: 0.88 }} />
+                          {todayPct !== null && (
+                            <div style={{ position: 'absolute', left: `${todayPct}%`, top: 0, bottom: 0, width: 1.5, background: '#f85149', opacity: 0.8 }} />
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+              <span style={{ fontSize: 9, color: T.textDim }}>{fmtS(ganttStart)}</span>
+              <span style={{ fontSize: 9, color: T.textDim }}>{fmtS(ganttEnd)}</span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -946,7 +1170,7 @@ export default function MobileApp() {
   const { T, mode, setMode } = useTheme()
 
   // Navigation
-  const [view, setView] = useState('projects')    // 'projects' | 'project' | 'avize' | 'profile'
+  const [view, setView] = useState('projects')    // 'projects' | 'project' | 'today' | 'profile'
   const [selProjId, setSelProjId] = useState(null)
 
   // Data
@@ -1126,7 +1350,7 @@ export default function MobileApp() {
   // ── Tabs ───────────────────────────────────────────────────────────────────
   const TABS = [
     { id: 'projects', label: 'Proiecte', Icon: Layers },
-    { id: 'avize', label: 'Avize', Icon: Building2 },
+    { id: 'today', label: 'Azi', Icon: CalendarDays },
     { id: 'profile', label: 'Profil', Icon: User },
   ]
 
@@ -1189,8 +1413,8 @@ export default function MobileApp() {
               onAcceptInv={handleAcceptInv}
               onDeclineInv={handleDeclineInv}
             />
-          ) : view === 'avize' ? (
-            <GlobalAvize projects={projects} collabProjects={collabProjects} T={T} />
+          ) : view === 'today' ? (
+            <TodayScreen projects={projects} collabProjects={collabProjects} T={T} onSelectProject={handleSelectProject} />
           ) : view === 'profile' ? (
             <ProfileScreen
               user={user}
