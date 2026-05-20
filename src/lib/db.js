@@ -232,17 +232,25 @@ const _slugDb = str =>
   String(str).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'p'
 
+// Firestore rejects undefined values — strip them recursively
+const _clean = (v) => {
+  if (v === null || v === undefined) return null
+  if (Array.isArray(v)) return v.map(_clean)
+  if (typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([,x])=>x!==undefined).map(([k,x])=>[k,_clean(x)]))
+  return v
+}
+
 export const clientToken = (project) =>
   `${_slugDb(project.name)}-${_slugDb(project.client)}-${String(project.id || '').slice(-5)}`
 
 export const publishClientView = async (token, ownerUid, projectId, project, config = {}) => {
   const { _isCollab: _a, ownerUid: _b, ownerEmail: _c, ...pub } = project
-  await setDoc(doc(fsdb, 'sharedProjects', token), {
+  await setDoc(doc(fsdb, 'sharedProjects', token), _clean({
     ownerUid, projectId,
     config: { showPhases: true, showAvize: true, showSpec: true, ...config },
     project: pub,
     updatedAt: Date.now(),
-  })
+  }))
 }
 
 export const listenSharedProject = (token, cb) =>

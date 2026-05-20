@@ -1219,7 +1219,7 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
     try {
       const token = clientToken(project)
       const config = { showPhases, showAvize, showSpec }
-      const projWithNote = { ...project, clientNote: clientNote.trim() || undefined }
+      const projWithNote = clientNote.trim() ? { ...project, clientNote: clientNote.trim() } : project
       await publishClientView(token, ownerUid, project.id, projWithNote, config)
       const url = `${window.location.origin}/c/${token}`
       setGeneratedUrl(url)
