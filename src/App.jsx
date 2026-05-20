@@ -332,7 +332,7 @@ const MsgText=({text,T})=>{
   return(
     <span>
       {parts.map((p,i)=>p.startsWith("@")
-        ?<span key={i} style={{color:T.accent,fontWeight:600,background:`${T.accent}18`,borderRadius:3,padding:"0 3px"}}>{p}</span>
+        ?<span key={i} style={{color:T.accent,background:`${T.accent}18`,borderRadius:3,padding:"0 3px",fontWeight:'inherit'}}>{p}</span>
         :<span key={i}>{p}</span>
       )}
     </span>
@@ -740,7 +740,7 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidP
     const val=e.target.value;setText(val);
     const cursor=e.target.selectionStart;
     const before=val.slice(0,cursor);
-    const m=before.match(/@([\w][\w\s]*)$/);
+    const m=before.match(/@([^\s@][^\s@]*)$/);
     if(m){setMentionQ(m[1]);setMentionPos(before.lastIndexOf("@"));}
     else setMentionQ(null);
   };
@@ -879,11 +879,36 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidP
                     <div style={{fontSize:10,color:T.textDim}}>{m.email}</div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    {m.role==="owner"&&<Chip label="Owner" color={T.amber} T={T}/>}
-                    <div style={{display:"flex",gap:-4}}>
-                      {/* Avatar color preview */}
-                      <div style={{width:10,height:10,borderRadius:"50%",background:avatarColor(m.email)}}/>
-                    </div>
+                    {m.role==="owner"
+                      ? <Chip label="Owner" color={T.amber} T={T}/>
+                      : <>
+                          <select
+                            value={m.role||'member'}
+                            onChange={e=>{
+                              const updatedMems=members.map(mb=>mb.id===m.id?{...mb,role:e.target.value}:mb)
+                              setMembers(updatedMems)
+                              updateProject(ownerUid,project.id,{members:updatedMems})
+                            }}
+                            style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:5,color:T.textMd,fontSize:10,padding:'3px 5px',cursor:'pointer',fontFamily:'inherit'}}
+                          >
+                            <option value="member">Membru</option>
+                            <option value="editor">Editor</option>
+                            <option value="viewer">Vizualizare</option>
+                          </select>
+                          <button
+                            onClick={()=>{
+                              const updatedMems=members.filter(mb=>mb.id!==m.id)
+                              setMembers(updatedMems)
+                              updateProject(ownerUid,project.id,{members:updatedMems})
+                              showToast(`${m.name} eliminat din proiect`,T.red)
+                            }}
+                            title="Revocă acces"
+                            style={{background:'transparent',border:`1px solid ${T.red}44`,borderRadius:5,padding:'3px 6px',color:T.red,cursor:'pointer',display:'flex',alignItems:'center'}}
+                          >
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                          </button>
+                        </>
+                    }
                   </div>
                 </div>
               ))}
@@ -1013,7 +1038,10 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidP
                   </button>
                 </div>
                 <textarea ref={inputRef} value={text} onChange={handleTextChange}
-                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&mentionQ===null){e.preventDefault();handleSend();}}}
+                  onKeyDown={e=>{
+                    if(e.key==="Tab"&&mentionQ!==null&&filteredMembers.length>0){e.preventDefault();selectMention(filteredMembers[0]);return}
+                    if(e.key==="Enter"&&!e.shiftKey&&mentionQ===null){e.preventDefault();handleSend();}
+                  }}
                   placeholder={`Scrie în #${chanLabel}… Enter trimite · @ menționează`}
                   rows={1} style={{flex:1,background:"transparent",border:"none",color:T.text,fontSize:13,outline:"none",resize:"none",fontFamily:"inherit",lineHeight:1.5,maxHeight:100,overflowY:"auto"}}
                   onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}/>
@@ -3109,21 +3137,24 @@ export default function App(){
                           import('jspdf'),
                         ])
                         const el = ganttRef.current
-                        const scrollEl = el.querySelector('div[style*="overflow"]') || el
-                        const prevOvf = scrollEl.style.overflowX
-                        const prevW   = scrollEl.style.width
-                        scrollEl.style.overflowX = 'visible'
-                        scrollEl.style.width = scrollEl.scrollWidth + 'px'
+                        // Expand all scrollable children so html2canvas captures full width
+                        const allScrollable = [el, ...Array.from(el.querySelectorAll('*'))].filter(n=>n.style)
+                        const saved = allScrollable.map(n=>({n,ov:n.style.overflow,ovx:n.style.overflowX,w:n.style.width}))
+                        allScrollable.forEach(n=>{n.style.overflow='visible';n.style.overflowX='visible';if(n.scrollWidth>n.offsetWidth)n.style.width=n.scrollWidth+'px'})
+                        await new Promise(r=>setTimeout(r,80))  // let browser reflow
+                        const fullW = el.scrollWidth, fullH = el.scrollHeight
                         const canvas = await html2canvas(el, {
                           backgroundColor: T===DARK?'#161b22':'#ffffff',
                           scale: 2,
-                          useCORS: true,
+                          useCORS: false,
+                          allowTaint: true,
                           logging: false,
-                          width: el.scrollWidth,
-                          height: el.scrollHeight,
+                          width: fullW,
+                          height: fullH,
+                          windowWidth: fullW,
+                          windowHeight: fullH,
                         })
-                        scrollEl.style.overflowX = prevOvf
-                        scrollEl.style.width = prevW
+                        saved.forEach(({n,ov,ovx,w})=>{n.style.overflow=ov;n.style.overflowX=ovx;n.style.width=w})
                         const pdf = new jsPDF({orientation:'landscape',unit:'mm',format:'a3'})
                         const pw = pdf.internal.pageSize.getWidth()
                         const ph = pdf.internal.pageSize.getHeight()
