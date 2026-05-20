@@ -1212,36 +1212,51 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
   const [showSpec, setShowSpec]     = useState(true)
   const [clientNote, setClientNote] = useState(project.clientNote || '')
   const [generatedUrl, setGeneratedUrl] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [isPermanent, setIsPermanent] = useState(false)
+  const urlInputRef = useRef(null)
 
-  const generate = async () => {
-    setLoading(true)
-    const config = { showPhases, showAvize, showSpec }
-    const proj = clientNote.trim() ? { ...project, clientNote: clientNote.trim() } : project
-    let url
-    try {
-      // Primary: short slug token → Firestore (permanent, updates reflected)
-      const slugTok = clientToken(project)
-      await publishClientView(slugTok, ownerUid, project.id, proj, config)
-      url = `${window.location.origin}/c/${slugTok}`
-    } catch {
-      // Fallback: encode all data in the URL itself (no backend needed)
-      const b64Tok = encodeShareToken(proj, config, clientNote)
-      url = `${window.location.origin}/c/${b64Tok}`
-    }
-    setGeneratedUrl(url)
-    setLoading(false)
+  const copyUrl = (url) => {
+    // Try modern clipboard API
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(url).then(() => toast('Link copiat în clipboard!'))
+      navigator.clipboard.writeText(url).then(() => toast('Link copiat!')).catch(() => legacyCopy(url))
     } else {
-      toast('Link generat!')
+      legacyCopy(url)
     }
   }
 
-  const copy = async () => {
-    if (!generatedUrl) return
-    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(generatedUrl); toast('Link copiat!') }
-    else toast(generatedUrl)
+  const legacyCopy = (url) => {
+    // Fallback: create a temporary input, select, execCommand
+    const el = document.createElement('textarea')
+    el.value = url
+    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0'
+    document.body.appendChild(el)
+    el.focus(); el.select()
+    try { document.execCommand('copy'); toast('Link copiat!') } catch { toast('Copiați manual linkul de sus') }
+    document.body.removeChild(el)
+  }
+
+  // Synchronous: generate base64url immediately (always works, no network)
+  // then try Firestore in background for a short permanent slug URL
+  const generate = () => {
+    const config = { showPhases, showAvize, showSpec }
+    const proj = clientNote.trim() ? { ...project, clientNote: clientNote.trim() } : project
+
+    // Step 1: generate URL instantly (sync, no async, clipboard works)
+    const b64Tok = encodeShareToken(proj, config, clientNote)
+    const b64Url = `${window.location.origin}/c/${b64Tok}`
+    setGeneratedUrl(b64Url)
+    setIsPermanent(false)
+    copyUrl(b64Url)
+
+    // Step 2: try Firestore in background for short permanent link
+    const slugTok = clientToken(project)
+    publishClientView(slugTok, ownerUid, project.id, proj, config)
+      .then(() => {
+        const permUrl = `${window.location.origin}/c/${slugTok}`
+        setGeneratedUrl(permUrl)
+        setIsPermanent(true)
+      })
+      .catch(() => {}) // base64 URL already works — ignore Firestore failure
   }
 
   const Toggle = ({ label, value, onChange }) => (
@@ -1268,7 +1283,7 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
       <div style={{ position: 'relative', background: T.panel, borderRadius: '16px 16px 0 0', padding: '20px 20px calc(20px + env(safe-area-inset-bottom))', maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>Configurează link client</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>Link client</div>
             <div style={{ fontSize: 12, color: T.textDim, marginTop: 2 }}>{project.name}</div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={20} color={T.textDim} /></button>
@@ -1293,23 +1308,47 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
         </div>
 
         {generatedUrl && (
-          <div style={{ background: `${T.accent}14`, border: `1px solid ${T.accent}33`, borderRadius: 10, padding: 12, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: 1, fontSize: 11, color: T.accent, wordBreak: 'break-all' }}>{generatedUrl}</div>
-            <button onClick={copy} style={{ background: T.accent, border: 'none', borderRadius: 6, padding: '6px 10px', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Copiază</button>
+          <div style={{ background: `${T.accent}14`, border: `1px solid ${T.accent}33`, borderRadius: 10, padding: 12, marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.accent, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                {isPermanent ? '✓ Link permanent' : 'Link generat'}
+              </div>
+            </div>
+            {/* Selectable input — user can long-press to copy on iOS */}
+            <input
+              ref={urlInputRef}
+              readOnly
+              value={generatedUrl}
+              onFocus={e => e.target.select()}
+              style={{
+                width: '100%', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6,
+                padding: '8px 10px', fontSize: 11, color: T.text, fontFamily: 'monospace',
+                boxSizing: 'border-box', marginBottom: 8
+              }}
+            />
+            <button
+              onClick={() => copyUrl(generatedUrl)}
+              style={{
+                width: '100%', background: T.accent, border: 'none', borderRadius: 6,
+                padding: '10px', color: '#fff', fontSize: 13, fontWeight: 700,
+                cursor: 'pointer', fontFamily: 'inherit'
+              }}
+            >
+              Copiază link
+            </button>
           </div>
         )}
 
         <button
-          onClick={generate} disabled={loading}
+          onClick={generate}
           style={{
-            width: '100%', background: T.accent, border: 'none', borderRadius: 10,
-            padding: '13px', color: '#fff', fontWeight: 700, fontSize: 15,
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.7 : 1, fontFamily: 'inherit'
+            width: '100%', background: generatedUrl ? T.border : T.accent, border: 'none', borderRadius: 10,
+            padding: '13px', color: generatedUrl ? T.text : '#fff', fontWeight: 700, fontSize: 15,
+            cursor: 'pointer', fontFamily: 'inherit'
           }}
         >
           <Share2 size={15} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-          {loading ? 'Se generează…' : generatedUrl ? 'Actualizează link' : 'Generează link'}
+          {generatedUrl ? 'Regenerează link' : 'Generează link'}
         </button>
       </div>
     </div>
