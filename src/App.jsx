@@ -11,7 +11,7 @@ import {
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, revokeAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, removeProjectMember, listenCollabProjects, getOrCreateClientToken, syncPublicProject } from './lib/db.js'
+import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, revokeAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenSharedProject, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, removeProjectMember, listenCollabProjects } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail, sendInvitationEmail } from './lib/emailService.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
@@ -2524,6 +2524,7 @@ export default function App(){
     textarea{scrollbar-width:thin;}
   `;
 
+  if(_pp[0]==='c' && _pp[1]) return <SharedView token={_pp[1]} />
   const urlShare = new URLSearchParams(location.search).get('share') || (_pp[0]==='share' ? _pp[1] : null)
   if(urlShare) return <SharedView token={urlShare}/>
 

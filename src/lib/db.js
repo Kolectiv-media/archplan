@@ -229,34 +229,19 @@ export const deleteShareLink = (token) =>
 // ── PERMANENT CLIENT SHARE LINKS ──────────────────────────────────────────────
 const _slugDb = str =>
   String(str).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'p'
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'p'
 
-const _pubProject = project => {
-  const { _isCollab, ownerUid: _o, ownerEmail: _oe, clientToken: _ct, ...pub } = project
-  return pub
-}
+export const clientToken = (project) =>
+  `${_slugDb(project.name)}-${_slugDb(project.client)}-${String(project.id || '').slice(-5)}`
 
-export const getOrCreateClientToken = async (ownerUid, projectId, project) => {
-  const snap = await get(ref(rtdb, `users/${ownerUid}/projects/${projectId}/clientToken`))
-  if (snap.exists()) {
-    const token = snap.val()
-    await update(ref(rtdb, `sharedProjects/${token}`), { project: _pubProject(project), updatedAt: serverTimestamp() })
-    return token
-  }
-  const token = `${_slugDb(project.name || 'proiect')}-${_slugDb(project.client || 'client')}-${Math.random().toString(36).slice(2, 7)}`
-  await update(ref(rtdb, `users/${ownerUid}/projects/${projectId}`), { clientToken: token })
-  await set(ref(rtdb, `sharedProjects/${token}`), {
+export const publishClientView = (token, ownerUid, projectId, project) => {
+  const { _isCollab: _a, ownerUid: _b, ownerEmail: _c, ...pub } = project
+  return set(ref(rtdb, `sharedProjects/${token}`), {
     ownerUid, projectId,
     config: { showPhases: true, showAvize: true, showSpec: true },
-    project: _pubProject(project),
-    createdAt: serverTimestamp(),
+    project: pub,
+    updatedAt: serverTimestamp(),
   })
-  return token
-}
-
-export const syncPublicProject = (token, project) => {
-  if (!token) return Promise.resolve()
-  return update(ref(rtdb, `sharedProjects/${token}`), { project: _pubProject(project), updatedAt: serverTimestamp() })
 }
 
 export const listenSharedProject = (token, cb) =>

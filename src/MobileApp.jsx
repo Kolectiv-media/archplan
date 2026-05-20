@@ -17,7 +17,7 @@ import {
   listenMyInvitations, acceptInvitation, declineInvitation,
   listenProjectMembers, listenCollabProjects,
   approveAccess, rejectAccess, revokeAccess,
-  getOrCreateClientToken
+  publishClientView, clientToken
 } from './lib/db.js'
 import { sendMentionEmail } from './lib/emailService.js'
 
@@ -305,13 +305,13 @@ function ProjectList({ projects, collabProjects, myInvitations, onSelect, onNew,
       <button
         onClick={onNew}
         style={{
-          position: 'fixed', bottom: 'calc(60px + env(safe-area-inset-bottom) + 16px)', right: 20,
-          width: 52, height: 52, borderRadius: '50%', background: T.accent,
+          position: 'fixed', bottom: 'calc(60px + env(safe-area-inset-bottom) + 14px)', right: 16,
+          width: 40, height: 40, borderRadius: '50%', background: T.accent,
           border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: `0 4px 16px ${T.accent}66`, zIndex: 20
+          boxShadow: `0 3px 12px ${T.accent}55`, zIndex: 20
         }}
       >
-        <Plus size={24} color="#fff" />
+        <Plus size={18} color="#fff" />
       </button>
     </div>
   )
@@ -802,16 +802,17 @@ function ProjectDetail({ project, user, T, toast, onBack }) {
                     setMenuOpen(false)
                     setShareLoading(true)
                     try {
-                      const token = await getOrCreateClientToken(ownerUid, project.id, project)
-                      const url = `${window.location.origin}?share=${token}`
-                      if (navigator.clipboard) {
+                      const token = clientToken(project)
+                      await publishClientView(token, ownerUid, project.id, project)
+                      const url = `${window.location.origin}/c/${token}`
+                      if (navigator.clipboard?.writeText) {
                         await navigator.clipboard.writeText(url)
                         toast('Link client copiat!')
                       } else {
                         toast(`Link: ${url}`)
                       }
-                    } catch {
-                      toast('Eroare la generare link')
+                    } catch (err) {
+                      toast('Eroare: ' + (err?.message || 'necunoscut'))
                     }
                     setShareLoading(false)
                   }}

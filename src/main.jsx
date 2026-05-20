@@ -29,7 +29,9 @@ function Root() {
       clearTimeout(timer)
     }
   }, [])
-  return mobile ? <MobileApp /> : <App />
+  // Client view pages render via App regardless of device (SharedView is already responsive)
+  const isClientView = window.location.pathname.startsWith('/c/')
+  return (mobile && !isClientView) ? <MobileApp /> : <App />
 }
 
 createRoot(document.getElementById('root')).render(
