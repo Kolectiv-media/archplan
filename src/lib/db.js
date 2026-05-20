@@ -254,11 +254,15 @@ export const publishClientView = async (token, ownerUid, projectId, project, con
 }
 
 export const listenSharedProject = (token, cb) =>
-  onSnapshot(doc(fsdb, 'sharedProjects', token), snap => {
-    if (!snap.exists()) { cb(null); return }
-    const data = snap.data()
-    cb(data.project ? { project: data.project, config: data.config } : null)
-  })
+  onSnapshot(
+    doc(fsdb, 'sharedProjects', token),
+    snap => {
+      if (!snap.exists()) { cb(null); return }
+      const data = snap.data()
+      cb(data.project ? { project: data.project, config: data.config } : null)
+    },
+    () => cb(null)  // Firestore error (rules/network) → treat as not found
+  )
 
 // Fallback: encode all project data directly in the URL (no DB needed)
 export const encodeShareToken = (project, config = {}, clientNote = '') => {
@@ -268,15 +272,21 @@ export const encodeShareToken = (project, config = {}, clientNote = '') => {
     _note: clientNote.trim() || null,
     _cfg: { showPhases: true, showAvize: true, showSpec: true, ...config }
   }))
-  return btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const json = JSON.stringify(payload)
+  // TextEncoder handles all Unicode (Romanian diacritics etc.) reliably
+  const bytes = new TextEncoder().encode(json)
+  const binary = Array.from(bytes, b => String.fromCharCode(b)).join('')
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 export const decodeShareToken = (token) => {
   try {
     const b64 = token.replace(/-/g, '+').replace(/_/g, '/')
     const padded = b64 + '==='.slice(0, (4 - b64.length % 4) % 4)
-    const payload = JSON.parse(decodeURIComponent(escape(atob(padded))))
+    const binary = atob(padded)
+    const bytes = new Uint8Array(Array.from(binary, c => c.charCodeAt(0)))
+    const json = new TextDecoder().decode(bytes)
+    const payload = JSON.parse(json)
     const { _cfg: config = {}, _note: clientNote, ...project } = payload
     if (clientNote) project.clientNote = clientNote
     return { project, config }

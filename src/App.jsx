@@ -448,11 +448,14 @@ const SharedView = ({ token }) => {
   useEffect(() => {
     // Slug token (e.g. "pud-locuinte-cernica-abc12") → Firestore, real-time
     if (isSlugToken(token)) {
+      // Timeout: if Firestore doesn't respond in 8s, show error
+      const timeout = setTimeout(() => setErr('Eroare la încărcare. Cereți un link nou.'), 8000)
       const unsub = listenSharedProject(token, r => {
+        clearTimeout(timeout)
         if (r) setData(r)
         else setErr('Link invalid sau expirat.')
       })
-      return unsub
+      return () => { clearTimeout(timeout); unsub() }
     }
 
     // Base64url token → decode directly from URL (no network needed)
