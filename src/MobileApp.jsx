@@ -4,7 +4,8 @@ import {
   Layers, Building2, User, ArrowLeft, MoreVertical, Plus, Search,
   Send, Check, X, ChevronRight, LogOut, Sun, Moon, Monitor,
   CheckCircle, Clock, Circle, AlertCircle, FileText, Trash2,
-  UserPlus, Users, Bell, CalendarDays, Share2, BarChart2
+  UserPlus, Users, Bell, CalendarDays, Share2, BarChart2,
+  Zap, Flame, Droplets, Radio, Leaf, Map, MoreHorizontal
 } from 'lucide-react'
 import { useAuth } from './hooks/useAuth.jsx'
 import { useTheme } from './hooks/useTheme.jsx'
@@ -17,7 +18,8 @@ import {
   listenMyInvitations, acceptInvitation, declineInvitation,
   listenProjectMembers, listenCollabProjects,
   approveAccess, rejectAccess, revokeAccess,
-  publishClientView, clientToken
+  publishClientView, clientToken,
+  inviteToProject
 } from './lib/db.js'
 import { sendMentionEmail } from './lib/emailService.js'
 
@@ -95,6 +97,16 @@ const CHANNELS = [
   { id: 'ac', label: 'Dosar AC' },
 ]
 
+const INST = [
+  { id: 'electrica', name: 'Electrica / E.ON / CEZ', short: 'Electrică', Icon: Zap,      color: '#d29922', validity: 24 },
+  { id: 'gaz',       name: 'Distrigaz / E.ON Gaz',   short: 'Gaz',       Icon: Flame,    color: '#f0883e', validity: 24 },
+  { id: 'apa',       name: 'Apă-Canal (RAJAC)',        short: 'Apă-Canal', Icon: Droplets, color: '#58a6ff', validity: 12 },
+  { id: 'telecom',   name: 'Telecom',                  short: 'Telecom',   Icon: Radio,    color: '#bc8cff', validity: 24 },
+  { id: 'mediu',     name: 'APM — Mediu',              short: 'Mediu',     Icon: Leaf,     color: '#3fb950', validity: 12 },
+  { id: 'drumuri',   name: 'DRDP / Drumuri',           short: 'Drumuri',   Icon: Map,      color: '#8b949e', validity: 12 },
+]
+const instMeta = id => INST.find(i => i.id === id) || { name: id, short: id, Icon: Building2, color: '#8b949e', validity: 12 }
+
 // ── Phase/Aviz builders ───────────────────────────────────────────────────────
 const mkPhases = (start) => [
   { phaseId: 'ph_cu_doc', name: 'Documentație CU', group: 'CU', status: 'pending', startDate: start, endDate: addDays(start, 14) },
@@ -108,7 +120,17 @@ const mkPhases = (start) => [
   { phaseId: 'ph_ac_dep', name: 'Depunere AC', group: 'AC', status: 'pending', startDate: addDays(start, 117), endDate: addDays(start, 120) },
   { phaseId: 'ph_ac_emit', name: 'Emitere AC', group: 'AC', status: 'pending', startDate: addDays(start, 120), endDate: addDays(start, 150) },
 ]
-const mkAvize = () => []
+const mkAvize = (start = TODAY) => INST.map(inst => ({
+  instId: inst.id,
+  avizId: `av_${inst.id}`,
+  status: 'pending',
+  dosarNr: '',
+  submissionDate: null,
+  estimatedDate: null,
+  emissionDate: null,
+  expiryDate: null,
+  attachments: [],
+}))
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
 const Avatar = ({ name = '?', email = '', size = 32, style = {} }) => {
@@ -207,8 +229,9 @@ const inp = T => ({
 // ════════════════════════════════════════════════════════════════════════════
 
 // ── ProjectList ───────────────────────────────────────────────────────────────
-function ProjectList({ projects, collabProjects, myInvitations, onSelect, onNew, user, T, toast, onAcceptInv, onDeclineInv }) {
+function ProjectList({ projects, collabProjects, myInvitations, onSelect, onNew, user, T, toast, onAcceptInv, onDeclineInv, onInvite }) {
   const [q, setQ] = useState('')
+  const [menuProjId, setMenuProjId] = useState(null)
 
   const all = [
     ...projects,
@@ -263,37 +286,79 @@ function ProjectList({ projects, collabProjects, myInvitations, onSelect, onNew,
           const phases = Array.isArray(p.phases) ? p.phases : []
           const pct = pctOf(phases)
           const typeColor = projTypeColor(p.type)
+          const isMenuOpen = menuProjId === p.id
           return (
             <div
               key={p.id}
-              onClick={() => onSelect(p)}
               style={{
                 background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12,
-                overflow: 'hidden', cursor: 'pointer', active: { opacity: 0.8 }
+                overflow: 'hidden', position: 'relative'
               }}
             >
               <div style={{ height: 3, background: typeColor }} />
               <div style={{ padding: '12px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => onSelect(p)}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 2 }}>{p.name}</div>
                     <div style={{ fontSize: 12, color: T.textMd }}>{p.client}</div>
                   </div>
-                  {p._isCollab && (
-                    <Chip label="Colaborator" color={T.purple} small />
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    {p._isCollab && <Chip label="Colaborator" color={T.purple} small />}
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        onClick={e => { e.stopPropagation(); setMenuProjId(isMenuOpen ? null : p.id) }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', color: T.textDim }}
+                      >
+                        <MoreHorizontal size={16} />
+                      </button>
+                      {isMenuOpen && (
+                        <div style={{
+                          position: 'absolute', right: 0, top: '100%', background: T.panel, border: `1px solid ${T.border}`,
+                          borderRadius: 10, boxShadow: T.shadow, zIndex: 50, minWidth: 160, overflow: 'hidden'
+                        }}>
+                          <button
+                            onClick={async e => {
+                              e.stopPropagation()
+                              setMenuProjId(null)
+                              try {
+                                const ownerUid = p._isCollab ? p.ownerUid : user.uid
+                                const token = clientToken(p)
+                                await publishClientView(token, ownerUid, p.id, p)
+                                const url = `${window.location.origin}/c/${token}`
+                                if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(url); toast('Link client copiat!') }
+                                else toast(`Link: ${url}`)
+                              } catch (err) { toast('Eroare: ' + (err?.message || 'necunoscut')) }
+                            }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '11px 14px', background: 'none', border: 'none', cursor: 'pointer', color: T.text, fontSize: 13, textAlign: 'left', fontFamily: 'inherit' }}
+                          >
+                            <Share2 size={13} color={T.accent} /> Link client
+                          </button>
+                          {!p._isCollab && (
+                            <button
+                              onClick={e => { e.stopPropagation(); setMenuProjId(null); onInvite(p) }}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '11px 14px', background: 'none', border: 'none', cursor: 'pointer', color: T.text, fontSize: 13, textAlign: 'left', fontFamily: 'inherit' }}
+                            >
+                              <UserPlus size={13} color={T.accent} /> Invită colaborator
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                {p.location && <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8 }}>{p.location}</div>}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ProgressBar pct={pct} T={T} height={4} />
-                  <span style={{ fontSize: 11, fontWeight: 600, color: pct === 100 ? T.green : T.textMd, whiteSpace: 'nowrap' }}>{pct}%</span>
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <span style={{ fontSize: 10, color: T.textDim }}>{phases.length} faze</span>
-                  <span style={{ fontSize: 10, color: T.textDim }}>·</span>
-                  <span style={{ fontSize: 10, color: T.textDim }}>{phases.filter(ph => ph.status === 'approved').length} finalizate</span>
-                  <span style={{ fontSize: 10, color: T.textDim }}>·</span>
-                  <span style={{ fontSize: 10, color: typeColor }}>{projTypeLabel(p.type)}</span>
+                <div style={{ cursor: 'pointer' }} onClick={() => onSelect(p)}>
+                  {p.location && <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8 }}>{p.location}</div>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <ProgressBar pct={pct} T={T} height={4} />
+                    <span style={{ fontSize: 11, fontWeight: 600, color: pct === 100 ? T.green : T.textMd, whiteSpace: 'nowrap' }}>{pct}%</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <span style={{ fontSize: 10, color: T.textDim }}>{phases.length} faze</span>
+                    <span style={{ fontSize: 10, color: T.textDim }}>·</span>
+                    <span style={{ fontSize: 10, color: T.textDim }}>{phases.filter(ph => ph.status === 'approved').length} finalizate</span>
+                    <span style={{ fontSize: 10, color: T.textDim }}>·</span>
+                    <span style={{ fontSize: 10, color: typeColor }}>{projTypeLabel(p.type)}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -451,13 +516,14 @@ function FazeTab({ project, ownerUid, T, toast }) {
 function AvizeTab({ project, ownerUid, T, toast }) {
   const avize = Array.isArray(project.avize) ? project.avize : []
   const [expandedId, setExpandedId] = useState(null)
+  const [showAdd, setShowAdd] = useState(false)
 
   const cycleStatus = async (e, av) => {
     e.stopPropagation()
     const next = cycleAvizStatus(av.status)
     const updated = avize.map(a => a.avizId === av.avizId ? { ...a, status: next } : a)
     await updateProject(ownerUid, project.id, { avize: updated })
-    toast(`${av.institution || av.instId}: ${avizMeta(next).label}`)
+    toast(`${instMeta(av.instId).short}: ${avizMeta(next).label}`)
   }
 
   const updateField = async (avizId, field, value) => {
@@ -465,35 +531,56 @@ function AvizeTab({ project, ownerUid, T, toast }) {
     await updateProject(ownerUid, project.id, { avize: updated })
   }
 
+  const removeAviz = async (e, avizId) => {
+    e.stopPropagation()
+    const updated = avize.filter(a => a.avizId !== avizId)
+    await updateProject(ownerUid, project.id, { avize: updated })
+    setExpandedId(null)
+    toast('Aviz eliminat')
+  }
+
+  const addAviz = async (inst) => {
+    const newAv = {
+      instId: inst.id, avizId: `av_${inst.id}_${uid()}`,
+      status: 'pending', dosarNr: '', submissionDate: null,
+      estimatedDate: null, emissionDate: null, expiryDate: null, attachments: [],
+    }
+    await updateProject(ownerUid, project.id, { avize: [...avize, newAv] })
+    setShowAdd(false)
+    toast(`${inst.short} adăugat`)
+  }
+
+  const available = INST.filter(i => !avize.some(a => a.instId === i.id))
+
   return (
-    <div style={{ padding: '12px 16px', paddingBottom: 80 }}>
-      {avize.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '32px 0', color: T.textDim, fontSize: 14 }}>
+    <div style={{ paddingBottom: 80 }}>
+      {avize.length === 0 && !showAdd && (
+        <div style={{ textAlign: 'center', padding: '32px 16px', color: T.textDim, fontSize: 14 }}>
           Niciun aviz adăugat
         </div>
       )}
       {avize.map(av => {
+        const inst = instMeta(av.instId)
         const meta = avizMeta(av.status)
-        const name = av.institution || av.instId || 'Aviz'
         const isExpanded = expandedId === av.avizId
+        const InstIcon = inst.Icon
         return (
-          <div key={av.avizId || av.instId} style={{ borderBottom: `1px solid ${T.border}` }}>
+          <div key={av.avizId} style={{ borderBottom: `1px solid ${T.border}` }}>
             <div
               onClick={() => setExpandedId(isExpanded ? null : av.avizId)}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer' }}
             >
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: meta.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Building2 size={16} color={meta.color} />
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: inst.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <InstIcon size={16} color={inst.color} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                {(av.submissionDate || av.emissionDate) && (
-                  <div style={{ fontSize: 11, color: T.textDim }}>
-                    {av.submissionDate && `Dep: ${fmtS(av.submissionDate)}`}
-                    {av.submissionDate && av.emissionDate && ' · '}
-                    {av.emissionDate && `Emis: ${fmtS(av.emissionDate)}`}
-                  </div>
-                )}
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inst.name}</div>
+                <div style={{ fontSize: 11, color: T.textDim }}>
+                  {av.submissionDate ? `Dep: ${fmtS(av.submissionDate)}` : ''}
+                  {av.submissionDate && av.emissionDate ? ' · ' : ''}
+                  {av.emissionDate ? `Emis: ${fmtS(av.emissionDate)}` : ''}
+                  {!av.submissionDate && !av.emissionDate ? inst.short : ''}
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Chip label={meta.label} color={meta.color} onClick={e => cycleStatus(e, av)} small />
@@ -501,7 +588,7 @@ function AvizeTab({ project, ownerUid, T, toast }) {
               </div>
             </div>
             {isExpanded && (
-              <div style={{ paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
                   { k: 'dosarNr', label: 'Nr. dosar', type: 'text', placeholder: 'ex. 1234/2025' },
                   { k: 'submissionDate', label: 'Data depunere', type: 'date' },
@@ -512,19 +599,58 @@ function AvizeTab({ project, ownerUid, T, toast }) {
                   <div key={k}>
                     <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>{label}</div>
                     <input
-                      type={type}
-                      value={av[k] || ''}
-                      placeholder={placeholder || ''}
+                      type={type} value={av[k] || ''} placeholder={placeholder || ''}
                       onChange={e => updateField(av.avizId, k, e.target.value)}
                       style={inp(T)}
                     />
                   </div>
                 ))}
+                <button
+                  onClick={e => removeAviz(e, av.avizId)}
+                  style={{ background: 'none', border: `1px solid ${'#f85149'}44`, borderRadius: 8, padding: '8px', color: '#f85149', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}
+                >Elimină aviz</button>
               </div>
             )}
           </div>
         )
       })}
+
+      {/* Add aviz section */}
+      <div style={{ padding: '12px 16px' }}>
+        {!showAdd ? (
+          available.length > 0 && (
+            <button
+              onClick={() => setShowAdd(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: `1px dashed ${T.borderLt}`, borderRadius: 8, padding: '10px 14px', color: T.textMd, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', width: '100%' }}
+            >
+              <Plus size={15} color={T.textMd} /> Adaugă aviz
+            </button>
+          )
+        ) : (
+          <div>
+            <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8 }}>Selectează instituție:</div>
+            {available.map(inst => {
+              const InstIcon = inst.Icon
+              return (
+                <button
+                  key={inst.id}
+                  onClick={() => addAviz(inst)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', marginBottom: 6, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  <div style={{ width: 28, height: 28, borderRadius: 6, background: inst.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <InstIcon size={13} color={inst.color} />
+                  </div>
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{inst.short}</div>
+                    <div style={{ fontSize: 10, color: T.textDim }}>{inst.name}</div>
+                  </div>
+                </button>
+              )
+            })}
+            <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', color: T.textDim, fontSize: 12, cursor: 'pointer', padding: '4px 0', fontFamily: 'inherit' }}>Anulează</button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1033,8 +1159,63 @@ function TodayScreen({ projects, collabProjects, T, onSelectProject }) {
   )
 }
 
+// ── InviteSheet ───────────────────────────────────────────────────────────────
+function InviteSheet({ project, user, T, toast, onClose }) {
+  const [email, setEmail] = useState('')
+  const [sending, setSending] = useState(false)
+
+  const send = async () => {
+    if (!email.trim() || sending) return
+    setSending(true)
+    try {
+      await inviteToProject(user.uid, project.id, project.name, user.email, email.trim().toLowerCase())
+      toast('Invitație trimisă!')
+      onClose()
+    } catch (err) {
+      toast('Eroare la trimitere invitație')
+    }
+    setSending(false)
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)' }} />
+      <div style={{ position: 'relative', background: T.panel, borderRadius: '16px 16px 0 0', padding: '20px 20px calc(20px + env(safe-area-inset-bottom))' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>Invită colaborator</div>
+            <div style={{ fontSize: 12, color: T.textDim, marginTop: 2 }}>{project.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={20} color={T.textDim} /></button>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Email colaborator</div>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && send()}
+            placeholder="colaborator@exemplu.ro"
+            autoFocus
+            style={inp(T)}
+          />
+        </div>
+        <button
+          onClick={send} disabled={!email.trim() || sending}
+          style={{
+            width: '100%', background: T.accent, border: 'none', borderRadius: 10,
+            padding: '13px', color: '#fff', fontWeight: 700, fontSize: 15,
+            cursor: !email.trim() || sending ? 'not-allowed' : 'pointer',
+            opacity: !email.trim() || sending ? 0.6 : 1, fontFamily: 'inherit'
+          }}
+        >{sending ? 'Se trimite…' : 'Trimite invitație'}</button>
+      </div>
+    </div>
+  )
+}
+
 // ── ProfileScreen ─────────────────────────────────────────────────────────────
-function ProfileScreen({ user, projects, collabProjects, pendingRequests, T, mode, setMode, logout, toast, onApprove, onReject }) {
+function ProfileScreen({ user, projects, collabProjects, pendingRequests, approvedUsers, T, mode, setMode, logout, toast, onApprove, onReject }) {
   const allProjects = [...projects, ...collabProjects]
   const avizeObtained = allProjects.reduce((n, p) => n + (Array.isArray(p.avize) ? p.avize.filter(a => a.status === 'approved' || a.status === 'picked_up').length : 0), 0)
   const activeProjects = projects.filter(p => {
@@ -1121,6 +1302,28 @@ function ProfileScreen({ user, projects, collabProjects, pendingRequests, T, mod
         </div>
       )}
 
+      {/* Users */}
+      <div style={{ margin: '0 16px 16px' }}>
+        <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Utilizatori activi ({approvedUsers.length})
+        </div>
+        {approvedUsers.length === 0 && (
+          <div style={{ fontSize: 12, color: T.textDim, textAlign: 'center', padding: '16px 0' }}>Niciun utilizator aprobat</div>
+        )}
+        {approvedUsers.map(u => (
+          <div key={u.id} style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+            background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 8
+          }}>
+            <Avatar name={u.name || u.email} email={u.email || ''} size={36} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{u.name || u.email?.split('@')[0]}</div>
+              <div style={{ fontSize: 11, color: T.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Logout */}
       <div style={{ margin: '0 16px' }}>
         <button
@@ -1179,11 +1382,13 @@ export default function MobileApp() {
   const [collabProjects, setCollabProjects] = useState([])
   const [myInvitations, setMyInvitations] = useState([])
   const [pendingRequests, setPendingRequests] = useState([])
+  const [approvedUsers, setApprovedUsers] = useState([])
   const [accessStatus, setAccessStatus] = useState(null)   // null | 'approved' | 'first_user' | 'not_approved'
 
   // UI
   const [toastMsg, setToastMsg] = useState(null)
   const [showNewProj, setShowNewProj] = useState(false)
+  const [inviteProject, setInviteProject] = useState(null)
   const [kbOpen, setKbOpen] = useState(false)
 
   const toast = useCallback((msg, ms = 3500) => {
@@ -1228,6 +1433,12 @@ export default function MobileApp() {
   useEffect(() => {
     if (!user || accessStatus !== 'approved') return
     const unsub = listenPendingRequests(reqs => setPendingRequests(reqs))
+    return unsub
+  }, [user, accessStatus])
+
+  useEffect(() => {
+    if (!user || accessStatus !== 'approved') return
+    const unsub = listenApprovedUsers(u => setApprovedUsers(u))
     return unsub
   }, [user, accessStatus])
 
@@ -1293,7 +1504,7 @@ export default function MobileApp() {
       location: form.location.trim(),
       startDate: start,
       phases: mkPhases(start),
-      avize: mkAvize(),
+      avize: mkAvize(start),
       specialitati: [],
     }
     try {
@@ -1413,6 +1624,7 @@ export default function MobileApp() {
               toast={toast}
               onAcceptInv={handleAcceptInv}
               onDeclineInv={handleDeclineInv}
+              onInvite={(p) => setInviteProject(p)}
             />
           ) : view === 'today' ? (
             <TodayScreen projects={projects} collabProjects={collabProjects} T={T} onSelectProject={handleSelectProject} />
@@ -1422,6 +1634,7 @@ export default function MobileApp() {
               projects={projects}
               collabProjects={collabProjects}
               pendingRequests={pendingRequests}
+              approvedUsers={approvedUsers}
               T={T}
               mode={mode}
               setMode={setMode}

@@ -1,0 +1,36 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    },
+    "settings": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "accessRequests": {
+      ".read": "auth != null",
+      ".write": true
+    },
+    "sharedProjects": {
+      ".read": true,
+      "$token": {
+        ".write": "auth != null"
+      }
+    },
+    "invitations": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "projectMembers": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "myCollabs": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}
