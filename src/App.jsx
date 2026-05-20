@@ -11,7 +11,7 @@ import {
 import { useAuth } from './hooks/useAuth.jsx'
 import { COMPANY } from './lib/constants.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, revokeAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenSharedProject, decodeShareToken, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, removeProjectMember, listenCollabProjects } from './lib/db.js'
+import { listenProjects, updateProject, createProject, listenMessages, sendMessage as dbSendMsg, deleteMessage as dbDeleteMsg, deleteProject, checkAccess, initAccessControl, requestAccess, approveAccess, rejectAccess, revokeAccess, listenPendingRequests, listenApprovedUsers, getSharedProject, listenSharedProject, decodeShareToken, isSlugToken, listenNotes, createNote, deleteNote, listenConnected, inviteToProject, listenMyInvitations, acceptInvitation, declineInvitation, listenProjectMembers, removeProjectMember, listenCollabProjects } from './lib/db.js'
 import { sendMentionEmail, sendAccessRequestEmail, sendInvitationEmail } from './lib/emailService.js'
 
 /* ─── THEME ─────────────────────────────────────────────────────────────────── */
@@ -446,11 +446,20 @@ const SharedView = ({ token }) => {
   const T = DARK
 
   useEffect(() => {
-    // New format: URL-encoded token (base64url, self-contained)
+    // Slug token (e.g. "pud-locuinte-cernica-abc12") → Firestore, real-time
+    if (isSlugToken(token)) {
+      const unsub = listenSharedProject(token, r => {
+        if (r) setData(r)
+        else setErr('Link invalid sau expirat.')
+      })
+      return unsub
+    }
+
+    // Base64url token → decode directly from URL (no network needed)
     const decoded = decodeShareToken(token)
     if (decoded) { setData(decoded); return }
 
-    // Legacy: b64_ prefix
+    // Legacy b64_ prefix
     if (token.startsWith('b64_')) {
       try {
         const d = JSON.parse(decodeURIComponent(escape(atob(token.slice(4)))))
@@ -459,12 +468,7 @@ const SharedView = ({ token }) => {
       return
     }
 
-    // Legacy: short Firestore token — real-time listener
-    const unsub = listenSharedProject(token, r => {
-      if (r) setData(r)
-      else setErr('Link invalid sau expirat.')
-    })
-    return unsub
+    setErr('Link invalid sau expirat.')
   }, [token])
 
   if (err) return (

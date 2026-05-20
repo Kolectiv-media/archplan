@@ -18,7 +18,7 @@ import {
   listenMyInvitations, acceptInvitation, declineInvitation,
   listenProjectMembers, listenCollabProjects,
   approveAccess, rejectAccess, revokeAccess,
-  encodeShareToken,
+  publishClientView, clientToken, encodeShareToken,
   inviteToProject
 } from './lib/db.js'
 import { sendMentionEmail } from './lib/emailService.js'
@@ -1212,19 +1212,29 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
   const [showSpec, setShowSpec]     = useState(true)
   const [clientNote, setClientNote] = useState(project.clientNote || '')
   const [generatedUrl, setGeneratedUrl] = useState(null)
+  const [loading, setLoading] = useState(false)
 
-  const generate = () => {
+  const generate = async () => {
+    setLoading(true)
+    const config = { showPhases, showAvize, showSpec }
+    const proj = clientNote.trim() ? { ...project, clientNote: clientNote.trim() } : project
+    let url
     try {
-      const token = encodeShareToken(project, { showPhases, showAvize, showSpec }, clientNote)
-      const url = `${window.location.origin}/c/${token}`
-      setGeneratedUrl(url)
-      if (navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(url).then(() => toast('Link copiat în clipboard!'))
-      } else {
-        toast('Link generat!')
-      }
-    } catch (err) {
-      toast('Eroare la generare link: ' + (err?.message || 'necunoscut'))
+      // Primary: short slug token → Firestore (permanent, updates reflected)
+      const slugTok = clientToken(project)
+      await publishClientView(slugTok, ownerUid, project.id, proj, config)
+      url = `${window.location.origin}/c/${slugTok}`
+    } catch {
+      // Fallback: encode all data in the URL itself (no backend needed)
+      const b64Tok = encodeShareToken(proj, config, clientNote)
+      url = `${window.location.origin}/c/${b64Tok}`
+    }
+    setGeneratedUrl(url)
+    setLoading(false)
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(() => toast('Link copiat în clipboard!'))
+    } else {
+      toast('Link generat!')
     }
   }
 
@@ -1290,15 +1300,16 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
         )}
 
         <button
-          onClick={generate}
+          onClick={generate} disabled={loading}
           style={{
             width: '100%', background: T.accent, border: 'none', borderRadius: 10,
             padding: '13px', color: '#fff', fontWeight: 700, fontSize: 15,
-            cursor: 'pointer', fontFamily: 'inherit'
+            cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.7 : 1, fontFamily: 'inherit'
           }}
         >
           <Share2 size={15} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-          {generatedUrl ? 'Actualizează link' : 'Generează link'}
+          {loading ? 'Se generează…' : generatedUrl ? 'Actualizează link' : 'Generează link'}
         </button>
       </div>
     </div>

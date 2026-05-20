@@ -227,20 +227,48 @@ export const getSharedProject = async (token) => {
 export const deleteShareLink = (token) =>
   remove(ref(rtdb, `sharedProjects/${token}`))
 
-// ── CLIENT SHARE LINKS — URL-encoded (no backend required) ───────────────────
-// All project data is encoded directly in the URL token (base64url).
-// No database read or write needed — the link is self-contained.
+// ── CLIENT SHARE LINKS ────────────────────────────────────────────────────────
+// Primary: short slug token → Firestore (permanent URL, always shows latest data)
+// Fallback: base64url token → self-contained URL (no backend needed)
 
+const _slug = str =>
+  String(str).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 25) || 'p'
+
+export const clientToken = (project) =>
+  `${_slug(project.name)}-${_slug(project.client || '')}-${String(project.id || '').slice(-5)}`
+
+// Slug token = only lowercase letters, digits, hyphens, short
+export const isSlugToken = (token) => /^[a-z0-9][a-z0-9-]{2,60}[a-z0-9]$/.test(token)
+
+export const publishClientView = async (token, ownerUid, projectId, project, config = {}) => {
+  const { _isCollab, ownerUid: _b, ownerEmail, id, ...pub } = project
+  // JSON roundtrip is the safest way to strip undefined, Firebase sentinels, functions
+  const clean = JSON.parse(JSON.stringify({
+    ownerUid, projectId,
+    config: { showPhases: true, showAvize: true, showSpec: true, ...config },
+    project: pub,
+    updatedAt: Date.now(),
+  }))
+  await setDoc(doc(fsdb, 'sharedProjects', token), clean)
+}
+
+export const listenSharedProject = (token, cb) =>
+  onSnapshot(doc(fsdb, 'sharedProjects', token), snap => {
+    if (!snap.exists()) { cb(null); return }
+    const data = snap.data()
+    cb(data.project ? { project: data.project, config: data.config } : null)
+  })
+
+// Fallback: encode all project data directly in the URL (no DB needed)
 export const encodeShareToken = (project, config = {}, clientNote = '') => {
   const { _isCollab, ownerUid, ownerEmail, id, ...pub } = project
-  const payload = JSON.parse(JSON.stringify({   // strips undefined/non-serializable
+  const payload = JSON.parse(JSON.stringify({
     ...pub,
     _note: clientNote.trim() || null,
     _cfg: { showPhases: true, showAvize: true, showSpec: true, ...config }
   }))
-  const json = JSON.stringify(payload)
-  // btoa needs Latin-1 — encodeURIComponent + unescape handles Unicode/diacritics
-  return btoa(unescape(encodeURIComponent(json)))
+  return btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
@@ -248,21 +276,12 @@ export const decodeShareToken = (token) => {
   try {
     const b64 = token.replace(/-/g, '+').replace(/_/g, '/')
     const padded = b64 + '==='.slice(0, (4 - b64.length % 4) % 4)
-    const json = decodeURIComponent(escape(atob(padded)))
-    const payload = JSON.parse(json)
+    const payload = JSON.parse(decodeURIComponent(escape(atob(padded))))
     const { _cfg: config = {}, _note: clientNote, ...project } = payload
     if (clientNote) project.clientNote = clientNote
     return { project, config }
   } catch { return null }
 }
-
-// Legacy Firestore-based share (kept for backward compat with old links)
-export const listenSharedProject = (token, cb) =>
-  onSnapshot(doc(fsdb, 'sharedProjects', token), snap => {
-    if (!snap.exists()) { cb(null); return }
-    const data = snap.data()
-    cb(data.project ? { project: data.project, config: data.config } : null)
-  })
 
 // ── COLLABORATION ─────────────────────────────────────────────────────────────
 export const inviteToProject = (ownerUid, projectId, projectName, inviterEmail, guestEmail) =>
