@@ -1213,10 +1213,10 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
   const [clientNote, setClientNote] = useState(project.clientNote || '')
   const [generatedUrl, setGeneratedUrl] = useState(null)
   const [isPermanent, setIsPermanent] = useState(false)
+  const [shortening, setShortening] = useState(false)
   const urlInputRef = useRef(null)
 
   const copyUrl = (url) => {
-    // Try modern clipboard API
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(url).then(() => toast('Link copiat!')).catch(() => legacyCopy(url))
     } else {
@@ -1225,7 +1225,6 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
   }
 
   const legacyCopy = (url) => {
-    // Fallback: create a temporary input, select, execCommand
     const el = document.createElement('textarea')
     el.value = url
     el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0'
@@ -1235,28 +1234,31 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
     document.body.removeChild(el)
   }
 
-  // Synchronous: generate base64url immediately (always works, no network)
-  // then try Firestore in background for a short permanent slug URL
-  const generate = () => {
+  const generate = async () => {
     const config = { showPhases, showAvize, showSpec }
     const proj = clientNote.trim() ? { ...project, clientNote: clientNote.trim() } : project
 
-    // Step 1: generate URL instantly (sync, no async, clipboard works)
+    // Always generate base64url instantly — guaranteed to work
     const b64Tok = encodeShareToken(proj, config, clientNote)
-    const b64Url = `${window.location.origin}/c/${b64Tok}`
-    setGeneratedUrl(b64Url)
+    const longUrl = `${window.location.origin}/c/${b64Tok}`
+    setGeneratedUrl(longUrl)
     setIsPermanent(false)
-    copyUrl(b64Url)
+    setShortening(true)
 
-    // Step 2: try Firestore in background for short permanent link
+    // Try Firestore for a short permanent slug URL (5s timeout)
     const slugTok = clientToken(project)
-    publishClientView(slugTok, ownerUid, project.id, proj, config)
-      .then(() => {
-        const permUrl = `${window.location.origin}/c/${slugTok}`
-        setGeneratedUrl(permUrl)
-        setIsPermanent(true)
-      })
-      .catch(() => {}) // base64 URL already works — ignore Firestore failure
+    try {
+      await Promise.race([
+        publishClientView(slugTok, ownerUid, project.id, proj, config),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+      ])
+      const shortUrl = `${window.location.origin}/c/${slugTok}`
+      setGeneratedUrl(shortUrl)
+      setIsPermanent(true)
+    } catch {
+      // Keep long URL — works fine, just ugly
+    }
+    setShortening(false)
   }
 
   const Toggle = ({ label, value, onChange }) => (
@@ -1307,14 +1309,21 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
           />
         </div>
 
+        {/* URL box — shows as soon as URL exists, updates to short when ready */}
         {generatedUrl && (
-          <div style={{ background: `${T.accent}14`, border: `1px solid ${T.accent}33`, borderRadius: 10, padding: 12, marginBottom: 14 }}>
+          <div style={{ background: `${T.accent}14`, border: `1px solid ${isPermanent ? T.green : T.accent}33`, borderRadius: 10, padding: 12, marginBottom: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: T.accent, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                {isPermanent ? '✓ Link permanent' : 'Link generat'}
-              </div>
+              {shortening ? (
+                <>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', border: `2px solid ${T.accent}`, borderTopColor: 'transparent', animation: 'spin .7s linear infinite' }} />
+                  <span style={{ fontSize: 10, color: T.textDim }}>Se generează link scurt…</span>
+                </>
+              ) : isPermanent ? (
+                <span style={{ fontSize: 10, fontWeight: 700, color: T.green }}>✓ Link scurt permanent</span>
+              ) : (
+                <span style={{ fontSize: 10, color: T.textDim }}>Link funcțional (Firestore indisponibil)</span>
+              )}
             </div>
-            {/* Selectable input — user can long-press to copy on iOS */}
             <input
               ref={urlInputRef}
               readOnly
@@ -1329,7 +1338,7 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
             <button
               onClick={() => copyUrl(generatedUrl)}
               style={{
-                width: '100%', background: T.accent, border: 'none', borderRadius: 6,
+                width: '100%', background: isPermanent ? T.green : T.accent, border: 'none', borderRadius: 6,
                 padding: '10px', color: '#fff', fontSize: 13, fontWeight: 700,
                 cursor: 'pointer', fontFamily: 'inherit'
               }}
@@ -1340,16 +1349,17 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
         )}
 
         <button
-          onClick={generate}
+          onClick={generate} disabled={shortening}
           style={{
-            width: '100%', background: generatedUrl ? T.border : T.accent, border: 'none', borderRadius: 10,
-            padding: '13px', color: generatedUrl ? T.text : '#fff', fontWeight: 700, fontSize: 15,
-            cursor: 'pointer', fontFamily: 'inherit'
+            width: '100%', background: shortening || generatedUrl ? T.border : T.accent, border: 'none', borderRadius: 10,
+            padding: '13px', color: shortening || generatedUrl ? T.text : '#fff', fontWeight: 700, fontSize: 15,
+            cursor: shortening ? 'not-allowed' : 'pointer', fontFamily: 'inherit'
           }}
         >
           <Share2 size={15} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-          {generatedUrl ? 'Regenerează link' : 'Generează link'}
+          {shortening ? 'Se generează…' : generatedUrl ? 'Regenerează link' : 'Generează link'}
         </button>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
     </div>
   )
