@@ -18,7 +18,7 @@ import {
   listenMyInvitations, acceptInvitation, declineInvitation,
   listenProjectMembers, listenCollabProjects,
   approveAccess, rejectAccess, revokeAccess,
-  publishClientView, clientToken,
+  encodeShareToken,
   inviteToProject
 } from './lib/db.js'
 import { sendMentionEmail } from './lib/emailService.js'
@@ -1211,26 +1211,21 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
   const [showAvize, setShowAvize]   = useState(true)
   const [showSpec, setShowSpec]     = useState(true)
   const [clientNote, setClientNote] = useState(project.clientNote || '')
-  const [loading, setLoading] = useState(false)
   const [generatedUrl, setGeneratedUrl] = useState(null)
 
-  const generate = async () => {
-    setLoading(true)
+  const generate = () => {
     try {
-      const token = clientToken(project)
-      const config = { showPhases, showAvize, showSpec }
-      const projWithNote = clientNote.trim() ? { ...project, clientNote: clientNote.trim() } : project
-      await publishClientView(token, ownerUid, project.id, projWithNote, config)
+      const token = encodeShareToken(project, { showPhases, showAvize, showSpec }, clientNote)
       const url = `${window.location.origin}/c/${token}`
       setGeneratedUrl(url)
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url)
-        toast('Link copiat în clipboard!')
+        navigator.clipboard.writeText(url).then(() => toast('Link copiat în clipboard!'))
+      } else {
+        toast('Link generat!')
       }
     } catch (err) {
       toast('Eroare la generare link: ' + (err?.message || 'necunoscut'))
     }
-    setLoading(false)
   }
 
   const copy = async () => {
@@ -1295,16 +1290,15 @@ function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
         )}
 
         <button
-          onClick={generate} disabled={loading}
+          onClick={generate}
           style={{
             width: '100%', background: T.accent, border: 'none', borderRadius: 10,
             padding: '13px', color: '#fff', fontWeight: 700, fontSize: 15,
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.7 : 1, fontFamily: 'inherit'
+            cursor: 'pointer', fontFamily: 'inherit'
           }}
         >
           <Share2 size={15} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-          {loading ? 'Se generează…' : generatedUrl ? 'Actualizează link' : 'Generează link'}
+          {generatedUrl ? 'Actualizează link' : 'Generează link'}
         </button>
       </div>
     </div>

@@ -227,32 +227,36 @@ export const getSharedProject = async (token) => {
 export const deleteShareLink = (token) =>
   remove(ref(rtdb, `sharedProjects/${token}`))
 
-// ── PERMANENT CLIENT SHARE LINKS (Firestore — public read rules apply) ────────
-const _slugDb = str =>
-  String(str).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'p'
+// ── CLIENT SHARE LINKS — URL-encoded (no backend required) ───────────────────
+// All project data is encoded directly in the URL token (base64url).
+// No database read or write needed — the link is self-contained.
 
-// Firestore rejects undefined values — strip them recursively
-const _clean = (v) => {
-  if (v === null || v === undefined) return null
-  if (Array.isArray(v)) return v.map(_clean)
-  if (typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([,x])=>x!==undefined).map(([k,x])=>[k,_clean(x)]))
-  return v
-}
-
-export const clientToken = (project) =>
-  `${_slugDb(project.name)}-${_slugDb(project.client)}-${String(project.id || '').slice(-5)}`
-
-export const publishClientView = async (token, ownerUid, projectId, project, config = {}) => {
-  const { _isCollab: _a, ownerUid: _b, ownerEmail: _c, ...pub } = project
-  await setDoc(doc(fsdb, 'sharedProjects', token), _clean({
-    ownerUid, projectId,
-    config: { showPhases: true, showAvize: true, showSpec: true, ...config },
-    project: pub,
-    updatedAt: Date.now(),
+export const encodeShareToken = (project, config = {}, clientNote = '') => {
+  const { _isCollab, ownerUid, ownerEmail, id, ...pub } = project
+  const payload = JSON.parse(JSON.stringify({   // strips undefined/non-serializable
+    ...pub,
+    _note: clientNote.trim() || null,
+    _cfg: { showPhases: true, showAvize: true, showSpec: true, ...config }
   }))
+  const json = JSON.stringify(payload)
+  // btoa needs Latin-1 — encodeURIComponent + unescape handles Unicode/diacritics
+  return btoa(unescape(encodeURIComponent(json)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+export const decodeShareToken = (token) => {
+  try {
+    const b64 = token.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = b64 + '==='.slice(0, (4 - b64.length % 4) % 4)
+    const json = decodeURIComponent(escape(atob(padded)))
+    const payload = JSON.parse(json)
+    const { _cfg: config = {}, _note: clientNote, ...project } = payload
+    if (clientNote) project.clientNote = clientNote
+    return { project, config }
+  } catch { return null }
+}
+
+// Legacy Firestore-based share (kept for backward compat with old links)
 export const listenSharedProject = (token, cb) =>
   onSnapshot(doc(fsdb, 'sharedProjects', token), snap => {
     if (!snap.exists()) { cb(null); return }
