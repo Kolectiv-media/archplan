@@ -483,9 +483,13 @@ const SharedView = ({ token }) => {
   const { project: p, config } = data
   const phases = p.phases || []
   const avize  = p.avize  || []
+  const specs  = p.specialitati || []
   const pct = phases.length ? Math.round(phases.filter(ph=>ph.status==='approved').length/phases.length*100) : 0
   const avizDone = avize.filter(av=>av.status==='approved').length
   const typeColor = PROJECT_TYPES.find(t=>t.id===p.type)?.color || '#58a6ff'
+  const showPhases = config.showPhases !== false && config.faze !== false
+  const showAvize  = config.showAvize  !== false && config.avize  !== false
+  const showSpec   = config.showSpec   !== false
 
   return (
     <div style={{minHeight:'100vh',background:T.bg,color:T.text,fontFamily:"'Geist','Helvetica Neue',sans-serif",padding:'0 0 40px'}}>
@@ -536,7 +540,7 @@ const SharedView = ({ token }) => {
           </div>
         </div>
 
-        {config.faze && phases.length>0 && (
+        {showPhases && phases.length>0 && (
           <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,padding:20,marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:T.textMd,textTransform:'uppercase',letterSpacing:.8,marginBottom:14}}>Faze proiect</div>
             {phases.map(ph => {
@@ -562,7 +566,7 @@ const SharedView = ({ token }) => {
           </div>
         )}
 
-        {config.avize && avize.length>0 && (
+        {showAvize && avize.length>0 && (
           <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,padding:20,marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:T.textMd,textTransform:'uppercase',letterSpacing:.8,marginBottom:14}}>Avize</div>
             {avize.map(av => {
@@ -592,6 +596,27 @@ const SharedView = ({ token }) => {
                       {daysLeft!==null&&daysLeft>30&&<span style={{color:'#3fb950'}}> ({daysLeft}z)</span>}
                     </div>}
                   </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {showSpec && specs.length>0 && (
+          <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,padding:20,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:T.textMd,textTransform:'uppercase',letterSpacing:.8,marginBottom:14}}>Specialități</div>
+            {specs.map(sp => {
+              const sm = {pending:{l:'WIP',c:'#484f58'},in_progress:{l:'În lucru',c:'#d29922'},submitted:{l:'Depus',c:'#58a6ff'},approved:{l:'Finalizat',c:'#3fb950'},rejected:{l:'Respins',c:'#f85149'}}
+              const s = sm[sp.status]||sm.pending
+              return (
+                <div key={sp.specId} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:`1px solid ${T.border}`}}>
+                  <div style={{width:8,height:8,borderRadius:'50%',background:s.c,flexShrink:0}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,color:T.text,fontWeight:500}}>{sp.name}</div>
+                    {sp.responsible&&<div style={{fontSize:10,color:T.textDim,marginTop:1}}>Responsabil: {sp.responsible}</div>}
+                  </div>
+                  {sp.dueDate&&<div style={{fontSize:10,color:T.textDim}}>{sp.dueDate}</div>}
+                  <div style={{fontSize:11,fontWeight:600,color:s.c,background:`${s.c}14`,border:`1px solid ${s.c}33`,borderRadius:4,padding:'2px 8px',flexShrink:0}}>{s.l}</div>
                 </div>
               )
             })}

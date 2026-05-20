@@ -236,7 +236,7 @@ const inp = T => ({
 // ════════════════════════════════════════════════════════════════════════════
 
 // ── ProjectList ───────────────────────────────────────────────────────────────
-function ProjectList({ projects, collabProjects, myInvitations, onSelect, onNew, user, T, toast, onAcceptInv, onDeclineInv, onInvite }) {
+function ProjectList({ projects, collabProjects, myInvitations, onSelect, onNew, user, T, toast, onAcceptInv, onDeclineInv, onInvite, onShare }) {
   const [q, setQ] = useState('')
   const [menuProjId, setMenuProjId] = useState(null)
 
@@ -324,17 +324,10 @@ function ProjectList({ projects, collabProjects, myInvitations, onSelect, onNew,
                           borderRadius: 10, boxShadow: T.shadow, zIndex: 50, minWidth: 160, overflow: 'hidden'
                         }}>
                           <button
-                            onClick={async e => {
+                            onClick={e => {
                               e.stopPropagation()
                               setMenuProjId(null)
-                              try {
-                                const ownerUid = p._isCollab ? p.ownerUid : user.uid
-                                const token = clientToken(p)
-                                await publishClientView(token, ownerUid, p.id, p)
-                                const url = `${window.location.origin}/c/${token}`
-                                if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(url); toast('Link client copiat!') }
-                                else toast(`Link: ${url}`)
-                              } catch (err) { toast('Eroare: ' + (err?.message || 'necunoscut')) }
+                              onShare(p)
                             }}
                             style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '11px 14px', background: 'none', border: 'none', cursor: 'pointer', color: T.text, fontSize: 13, textAlign: 'left', fontFamily: 'inherit' }}
                           >
@@ -951,10 +944,9 @@ function ChatTab({ project, ownerUid, user, T, toast }) {
 }
 
 // ── ProjectDetail ─────────────────────────────────────────────────────────────
-function ProjectDetail({ project, user, T, toast, onBack }) {
+function ProjectDetail({ project, user, T, toast, onBack, onShare }) {
   const [tab, setTab] = useState('faze')
   const [menuOpen, setMenuOpen] = useState(false)
-  const [shareLoading, setShareLoading] = useState(false)
 
   const ownerUid = project._isCollab ? project.ownerUid : user.uid
   const phases = Array.isArray(project.phases) ? project.phases : []
@@ -995,28 +987,11 @@ function ProjectDetail({ project, user, T, toast, onBack }) {
                 borderRadius: 10, boxShadow: T.shadow, zIndex: 50, minWidth: 160, overflow: 'hidden'
               }}>
                 <button
-                  onClick={async () => {
-                    setMenuOpen(false)
-                    setShareLoading(true)
-                    try {
-                      const token = clientToken(project)
-                      await publishClientView(token, ownerUid, project.id, project)
-                      const url = `${window.location.origin}/c/${token}`
-                      if (navigator.clipboard?.writeText) {
-                        await navigator.clipboard.writeText(url)
-                        toast('Link client copiat!')
-                      } else {
-                        toast(`Link: ${url}`)
-                      }
-                    } catch (err) {
-                      toast('Eroare: ' + (err?.message || 'necunoscut'))
-                    }
-                    setShareLoading(false)
-                  }}
+                  onClick={() => { setMenuOpen(false); onShare?.(project) }}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer', color: T.text, fontSize: 13, textAlign: 'left', fontFamily: 'inherit' }}
                 >
                   <Share2 size={14} color={T.accent} />
-                  {shareLoading ? 'Se generează…' : 'Link client'}
+                  Link client
                 </button>
               </div>
             )}
@@ -1225,6 +1200,112 @@ function TodayScreen({ projects, collabProjects, T, onSelectProject }) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── ShareConfigSheet ─────────────────────────────────────────────────────────
+function ShareConfigSheet({ project, ownerUid, user, T, toast, onClose }) {
+  const [showPhases, setShowPhases] = useState(true)
+  const [showAvize, setShowAvize]   = useState(true)
+  const [showSpec, setShowSpec]     = useState(true)
+  const [clientNote, setClientNote] = useState(project.clientNote || '')
+  const [loading, setLoading] = useState(false)
+  const [generatedUrl, setGeneratedUrl] = useState(null)
+
+  const generate = async () => {
+    setLoading(true)
+    try {
+      const token = clientToken(project)
+      const config = { showPhases, showAvize, showSpec }
+      const projWithNote = { ...project, clientNote: clientNote.trim() || undefined }
+      await publishClientView(token, ownerUid, project.id, projWithNote, config)
+      const url = `${window.location.origin}/c/${token}`
+      setGeneratedUrl(url)
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+        toast('Link copiat în clipboard!')
+      }
+    } catch (err) {
+      toast('Eroare la generare link: ' + (err?.message || 'necunoscut'))
+    }
+    setLoading(false)
+  }
+
+  const copy = async () => {
+    if (!generatedUrl) return
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(generatedUrl); toast('Link copiat!') }
+    else toast(generatedUrl)
+  }
+
+  const Toggle = ({ label, value, onChange }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: `1px solid ${T.border}` }}>
+      <span style={{ fontSize: 14, color: T.text }}>{label}</span>
+      <button
+        onClick={() => onChange(!value)}
+        style={{
+          width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+          background: value ? T.accent : T.border, position: 'relative', transition: 'background .2s'
+        }}
+      >
+        <div style={{
+          position: 'absolute', top: 2, left: value ? 22 : 2, width: 20, height: 20,
+          borderRadius: '50%', background: '#fff', transition: 'left .2s'
+        }} />
+      </button>
+    </div>
+  )
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)' }} />
+      <div style={{ position: 'relative', background: T.panel, borderRadius: '16px 16px 0 0', padding: '20px 20px calc(20px + env(safe-area-inset-bottom))', maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>Configurează link client</div>
+            <div style={{ fontSize: 12, color: T.textDim, marginTop: 2 }}>{project.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={20} color={T.textDim} /></button>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Secțiuni vizibile</div>
+          <Toggle label="Faze proiect" value={showPhases} onChange={setShowPhases} />
+          <Toggle label="Avize" value={showAvize} onChange={setShowAvize} />
+          <Toggle label="Specialități" value={showSpec} onChange={setShowSpec} />
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Notă pentru client (opțional)</div>
+          <textarea
+            value={clientNote}
+            onChange={e => setClientNote(e.target.value)}
+            placeholder="Scrieți un mesaj pentru client…"
+            rows={3}
+            style={{ ...inp(T), resize: 'vertical', minHeight: 72 }}
+          />
+        </div>
+
+        {generatedUrl && (
+          <div style={{ background: `${T.accent}14`, border: `1px solid ${T.accent}33`, borderRadius: 10, padding: 12, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1, fontSize: 11, color: T.accent, wordBreak: 'break-all' }}>{generatedUrl}</div>
+            <button onClick={copy} style={{ background: T.accent, border: 'none', borderRadius: 6, padding: '6px 10px', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Copiază</button>
+          </div>
+        )}
+
+        <button
+          onClick={generate} disabled={loading}
+          style={{
+            width: '100%', background: T.accent, border: 'none', borderRadius: 10,
+            padding: '13px', color: '#fff', fontWeight: 700, fontSize: 15,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.7 : 1, fontFamily: 'inherit'
+          }}
+        >
+          <Share2 size={15} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+          {loading ? 'Se generează…' : generatedUrl ? 'Actualizează link' : 'Generează link'}
+        </button>
       </div>
     </div>
   )
@@ -1460,6 +1541,7 @@ export default function MobileApp() {
   const [toastMsg, setToastMsg] = useState(null)
   const [showNewProj, setShowNewProj] = useState(false)
   const [inviteProject, setInviteProject] = useState(null)
+  const [shareConfigProject, setShareConfigProject] = useState(null)
   const [kbOpen, setKbOpen] = useState(false)
 
   const toast = useCallback((msg, ms = 3500) => {
@@ -1682,6 +1764,7 @@ export default function MobileApp() {
               T={T}
               toast={toast}
               onBack={() => { setView('projects'); setSelProjId(null) }}
+              onShare={(p) => setShareConfigProject(p)}
             />
           ) : view === 'projects' ? (
             <ProjectList
@@ -1696,6 +1779,7 @@ export default function MobileApp() {
               onAcceptInv={handleAcceptInv}
               onDeclineInv={handleDeclineInv}
               onInvite={(p) => setInviteProject(p)}
+              onShare={(p) => setShareConfigProject(p)}
             />
           ) : view === 'today' ? (
             <TodayScreen projects={projects} collabProjects={collabProjects} T={T} onSelectProject={handleSelectProject} />
@@ -1751,6 +1835,18 @@ export default function MobileApp() {
       {/* Invite collaborator sheet */}
       {inviteProject && (
         <InviteSheet project={inviteProject} user={user} T={T} toast={toast} onClose={() => setInviteProject(null)} />
+      )}
+
+      {/* Share config sheet */}
+      {shareConfigProject && (
+        <ShareConfigSheet
+          project={shareConfigProject}
+          ownerUid={shareConfigProject._isCollab ? shareConfigProject.ownerUid : user.uid}
+          user={user}
+          T={T}
+          toast={toast}
+          onClose={() => setShareConfigProject(null)}
+        />
       )}
     </div>
   )

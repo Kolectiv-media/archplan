@@ -1,6 +1,7 @@
 // src/lib/db.js — Firebase Realtime Database CRUD + real-time listeners
 import { ref, onValue, push, set, update, remove, get, serverTimestamp } from 'firebase/database'
-import { rtdb } from './firebase.js'
+import { doc, setDoc, onSnapshot } from 'firebase/firestore'
+import { rtdb, fsdb } from './firebase.js'
 
 const toArr = v => !v ? [] : Array.isArray(v) ? v : Object.values(v)
 
@@ -226,7 +227,7 @@ export const getSharedProject = async (token) => {
 export const deleteShareLink = (token) =>
   remove(ref(rtdb, `sharedProjects/${token}`))
 
-// ── PERMANENT CLIENT SHARE LINKS ──────────────────────────────────────────────
+// ── PERMANENT CLIENT SHARE LINKS (Firestore — public read rules apply) ────────
 const _slugDb = str =>
   String(str).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'p'
@@ -234,21 +235,21 @@ const _slugDb = str =>
 export const clientToken = (project) =>
   `${_slugDb(project.name)}-${_slugDb(project.client)}-${String(project.id || '').slice(-5)}`
 
-export const publishClientView = (token, ownerUid, projectId, project) => {
+export const publishClientView = async (token, ownerUid, projectId, project, config = {}) => {
   const { _isCollab: _a, ownerUid: _b, ownerEmail: _c, ...pub } = project
-  return set(ref(rtdb, `sharedProjects/${token}`), {
+  await setDoc(doc(fsdb, 'sharedProjects', token), {
     ownerUid, projectId,
-    config: { showPhases: true, showAvize: true, showSpec: true },
+    config: { showPhases: true, showAvize: true, showSpec: true, ...config },
     project: pub,
-    updatedAt: serverTimestamp(),
+    updatedAt: Date.now(),
   })
 }
 
 export const listenSharedProject = (token, cb) =>
-  onValue(ref(rtdb, `sharedProjects/${token}`), snap => {
+  onSnapshot(doc(fsdb, 'sharedProjects', token), snap => {
     if (!snap.exists()) { cb(null); return }
-    const { project, config } = snap.val()
-    cb(project ? { project, config } : null)
+    const data = snap.data()
+    cb(data.project ? { project: data.project, config: data.config } : null)
   })
 
 // ── COLLABORATION ─────────────────────────────────────────────────────────────
