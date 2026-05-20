@@ -42,6 +42,13 @@ const AVATAR_COLORS = ['#58a6ff', '#3fb950', '#d29922', '#bc8cff', '#f0883e', '#
 const avatarColor = str => AVATAR_COLORS[String(str || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length]
 const slugify = str => String(str).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'proiect'
 const addDays = (dateStr, n) => { const d = new Date(dateStr + 'T12:00:00'); d.setDate(d.getDate() + n); return localDate(d) }
+const addWorkDays = (dateStr, n) => {
+  if (!dateStr) return dateStr
+  const d = new Date(dateStr + 'T12:00:00')
+  let added = 0
+  while (added < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) added++ }
+  return localDate(d)
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const PROJECT_TYPES = [
@@ -518,23 +525,29 @@ function AvizeTab({ project, ownerUid, T, toast }) {
   const [expandedId, setExpandedId] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
 
+  const updateAviz = async (avizId, updates) => {
+    const updated = avize.map(a => a.avizId === avizId ? { ...a, ...updates } : a)
+    await updateProject(ownerUid, project.id, { avize: updated })
+  }
+
+  // Mirror browser rule: ready/approved/picked_up → set emissionDate to TODAY if unset;
+  // any other status → clear emissionDate
   const cycleStatus = async (e, av) => {
     e.stopPropagation()
     const next = cycleAvizStatus(av.status)
-    const updated = avize.map(a => a.avizId === av.avizId ? { ...a, status: next } : a)
-    await updateProject(ownerUid, project.id, { avize: updated })
+    const upd = { status: next }
+    if (['ready', 'approved', 'picked_up'].includes(next)) {
+      if (!av.emissionDate) upd.emissionDate = TODAY
+    } else {
+      upd.emissionDate = null
+    }
+    await updateAviz(av.avizId, upd)
     toast(`${instMeta(av.instId).short}: ${avizMeta(next).label}`)
-  }
-
-  const updateField = async (avizId, field, value) => {
-    const updated = avize.map(a => a.avizId === avizId ? { ...a, [field]: value } : a)
-    await updateProject(ownerUid, project.id, { avize: updated })
   }
 
   const removeAviz = async (e, avizId) => {
     e.stopPropagation()
-    const updated = avize.filter(a => a.avizId !== avizId)
-    await updateProject(ownerUid, project.id, { avize: updated })
+    await updateProject(ownerUid, project.id, { avize: avize.filter(a => a.avizId !== avizId) })
     setExpandedId(null)
     toast('Aviz eliminat')
   }
@@ -564,6 +577,8 @@ function AvizeTab({ project, ownerUid, T, toast }) {
         const meta = avizMeta(av.status)
         const isExpanded = expandedId === av.avizId
         const InstIcon = inst.Icon
+        const daysLeft = av.expiryDate ? Math.round((new Date(av.expiryDate) - new Date()) / 86400000) : null
+        const expiryWarn = daysLeft !== null && daysLeft <= 30
         return (
           <div key={av.avizId} style={{ borderBottom: `1px solid ${T.border}` }}>
             <div
@@ -575,11 +590,12 @@ function AvizeTab({ project, ownerUid, T, toast }) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inst.name}</div>
-                <div style={{ fontSize: 11, color: T.textDim }}>
+                <div style={{ fontSize: 11, color: expiryWarn ? '#f85149' : T.textDim }}>
                   {av.submissionDate ? `Dep: ${fmtS(av.submissionDate)}` : ''}
                   {av.submissionDate && av.emissionDate ? ' · ' : ''}
                   {av.emissionDate ? `Emis: ${fmtS(av.emissionDate)}` : ''}
-                  {!av.submissionDate && !av.emissionDate ? inst.short : ''}
+                  {expiryWarn ? ` · ⚠ ${daysLeft < 0 ? 'EXPIRAT' : `exp. ${daysLeft}z`}` : ''}
+                  {!av.submissionDate && !av.emissionDate && !expiryWarn ? inst.short : ''}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -588,27 +604,84 @@ function AvizeTab({ project, ownerUid, T, toast }) {
               </div>
             </div>
             {isExpanded && (
-              <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[
-                  { k: 'dosarNr', label: 'Nr. dosar', type: 'text', placeholder: 'ex. 1234/2025' },
-                  { k: 'submissionDate', label: 'Data depunere', type: 'date' },
-                  { k: 'estimatedDate', label: 'Data estimată emitere', type: 'date' },
-                  { k: 'emissionDate', label: 'Data emitere', type: 'date' },
-                  { k: 'expiryDate', label: 'Data expirare', type: 'date' },
-                ].map(({ k, label, type, placeholder }) => (
-                  <div key={k}>
-                    <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>{label}</div>
-                    <input
-                      type={type} value={av[k] || ''} placeholder={placeholder || ''}
-                      onChange={e => updateField(av.avizId, k, e.target.value)}
-                      style={inp(T)}
-                    />
+              <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                {/* Nr. dosar */}
+                <div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>Nr. dosar</div>
+                  <input type="text" value={av.dosarNr || ''} placeholder="ex. 1234/2025"
+                    onChange={e => updateAviz(av.avizId, { dosarNr: e.target.value })} style={inp(T)} />
+                </div>
+
+                {/* Submission date — auto-computes estimatedDate (+30 working days) */}
+                <div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>Data depunere documentație</div>
+                  <input type="date" value={av.submissionDate || ''}
+                    onChange={e => {
+                      const sd = e.target.value
+                      const upd = { submissionDate: sd }
+                      if (sd) upd.estimatedDate = addWorkDays(sd, 30)
+                      else upd.estimatedDate = null
+                      updateAviz(av.avizId, upd)
+                    }} style={inp(T)} />
+                </div>
+
+                {/* Estimated date — auto-filled, still editable */}
+                <div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Estimare emitere (≈30 zile lucrătoare)
+                    {av.submissionDate && !av.estimatedDate && (
+                      <button onClick={() => updateAviz(av.avizId, { estimatedDate: addWorkDays(av.submissionDate, 30) })}
+                        style={{ fontSize: 10, background: 'none', border: `1px solid ${T.accent}44`, color: T.accent, borderRadius: 4, padding: '1px 6px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                        +30 zile
+                      </button>
+                    )}
                   </div>
-                ))}
-                <button
-                  onClick={e => removeAviz(e, av.avizId)}
-                  style={{ background: 'none', border: `1px solid ${'#f85149'}44`, borderRadius: 8, padding: '8px', color: '#f85149', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}
-                >Elimină aviz</button>
+                  <input type="date" value={av.estimatedDate || ''}
+                    onChange={e => updateAviz(av.avizId, { estimatedDate: e.target.value })} style={inp(T)} />
+                </div>
+
+                {/* Emission date */}
+                <div>
+                  <div style={{ fontSize: 11, color: T.textDim, marginBottom: 4 }}>Data emitere aviz</div>
+                  <input type="date" value={av.emissionDate || ''}
+                    onChange={e => updateAviz(av.avizId, { emissionDate: e.target.value })} style={inp(T)} />
+                </div>
+
+                {/* Expiry date with validity shortcuts and warning */}
+                <div>
+                  <div style={{ fontSize: 11, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6, color: expiryWarn ? '#f85149' : T.textDim }}>
+                    Data expirare
+                    {daysLeft !== null && daysLeft <= 30 && (
+                      <span style={{ fontWeight: 700 }}>{daysLeft < 0 ? '⚠ EXPIRAT' : `⚠ ${daysLeft}z`}</span>
+                    )}
+                  </div>
+                  <input type="date" value={av.expiryDate || ''} min={av.emissionDate || undefined}
+                    onChange={e => {
+                      if (av.emissionDate && e.target.value && e.target.value < av.emissionDate) return
+                      updateAviz(av.avizId, { expiryDate: e.target.value })
+                    }}
+                    style={{ ...inp(T), borderColor: expiryWarn ? '#f85149' : undefined }} />
+                  {av.emissionDate && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                      {[12, 24].map(m => (
+                        <button key={m}
+                          onClick={() => {
+                            const b = new Date(av.emissionDate + 'T12:00:00')
+                            b.setMonth(b.getMonth() + m)
+                            updateAviz(av.avizId, { expiryDate: localDate(b) })
+                          }}
+                          style={{ flex: 1, background: 'none', border: `1px solid ${T.borderLt}`, borderRadius: 6, padding: '7px', color: T.textMd, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                        >+{m} luni</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button onClick={e => removeAviz(e, av.avizId)}
+                  style={{ background: 'none', border: '1px solid #f8514944', borderRadius: 8, padding: '8px', color: '#f85149', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Elimină aviz
+                </button>
               </div>
             )}
           </div>
@@ -619,10 +692,8 @@ function AvizeTab({ project, ownerUid, T, toast }) {
       <div style={{ padding: '12px 16px' }}>
         {!showAdd ? (
           available.length > 0 && (
-            <button
-              onClick={() => setShowAdd(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: `1px dashed ${T.borderLt}`, borderRadius: 8, padding: '10px 14px', color: T.textMd, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', width: '100%' }}
-            >
+            <button onClick={() => setShowAdd(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: `1px dashed ${T.borderLt}`, borderRadius: 8, padding: '10px 14px', color: T.textMd, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', width: '100%' }}>
               <Plus size={15} color={T.textMd} /> Adaugă aviz
             </button>
           )
@@ -632,11 +703,8 @@ function AvizeTab({ project, ownerUid, T, toast }) {
             {available.map(inst => {
               const InstIcon = inst.Icon
               return (
-                <button
-                  key={inst.id}
-                  onClick={() => addAviz(inst)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', marginBottom: 6, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}
-                >
+                <button key={inst.id} onClick={() => addAviz(inst)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', marginBottom: 6, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
                   <div style={{ width: 28, height: 28, borderRadius: 6, background: inst.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <InstIcon size={13} color={inst.color} />
                   </div>
@@ -647,7 +715,10 @@ function AvizeTab({ project, ownerUid, T, toast }) {
                 </button>
               )
             })}
-            <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', color: T.textDim, fontSize: 12, cursor: 'pointer', padding: '4px 0', fontFamily: 'inherit' }}>Anulează</button>
+            <button onClick={() => setShowAdd(false)}
+              style={{ background: 'none', border: 'none', color: T.textDim, fontSize: 12, cursor: 'pointer', padding: '4px 0', fontFamily: 'inherit' }}>
+              Anulează
+            </button>
           </div>
         )}
       </div>
