@@ -84,6 +84,27 @@ const INST = [
   {id:"drumuri",  name:"DRDP / Drumuri",           short:"Drumuri",   Icon:Map,      color:"#8b949e", validity:12, info:"Aviz administrator drum. Documente: cerere, plan de situație, studiu de trafic dacă e cazul."},
 ];
 
+/* ─── SPECIALITĂȚI ────────────────────────────────────────────────────────────── */
+const SPECIALITATI_LIST = [
+  {id:'geotehnic',   label:'Studiu geotehnic',          color:'#8b949e'},
+  {id:'topografic',  label:'Studiu topografic',          color:'#58a6ff'},
+  {id:'cadastral',   label:'Studiu cadastral',           color:'#3fb950'},
+  {id:'oportunitate',label:'Studiu de oportunitate',     color:'#d29922'},
+  {id:'expertiza',   label:'Expertiză tehnică',          color:'#f85149'},
+  {id:'audit',       label:'Audit energetic',            color:'#f0883e'},
+  {id:'hidrologic',  label:'Studiu hidrologic',          color:'#79c0ff'},
+  {id:'mediu_spec',  label:'Studiu de mediu',            color:'#56d364'},
+  {id:'pud_puz',     label:'PUD / PUZ',                  color:'#bc8cff'},
+  {id:'rezistenta',  label:'Proiect rezistență',         color:'#ff7b72'},
+  {id:'instalatii',  label:'Instalații',                 color:'#ffa657'},
+  {id:'isu',         label:'ISU — Securitate incendiu',  color:'#f85149'},
+];
+const SPEC_STATUSES = [
+  {id:'pending',     label:'De realizat', color:'#484f58'},
+  {id:'in_progress', label:'În lucru',    color:'#d29922'},
+  {id:'done',        label:'Finalizat',   color:'#3fb950'},
+];
+
 /* ─── DEMO MEMBERS ───────────────────────────────────────────────────────────── */
 const MEMBERS = [
   {id:"m1", name:"Ion Popescu",    email:"ion@studiokolectiv.ro",   role:"owner"},
@@ -582,8 +603,23 @@ const SharedView = ({ token }) => {
   )
 }
 
+/* ─── AUDIO ──────────────────────────────────────────────────────────────────── */
+const playMsgBeep = () => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.connect(g); g.connect(ctx.destination)
+    o.type = 'sine'
+    o.frequency.setValueAtTime(880, ctx.currentTime)
+    o.frequency.setValueAtTime(660, ctx.currentTime + 0.12)
+    g.gain.setValueAtTime(0.22, ctx.currentTime)
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+    o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.35)
+  } catch(e) {}
+}
+
 /* ─── CHAT COMPONENT ─────────────────────────────────────────────────────────── */
-const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidProp})=>{
+const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidProp,onNewMsg})=>{
   const [channel,   setChannel]   = useState("general");
   const [messages,  setMessages]  = useState([]);
   const [text,      setText]      = useState("");
@@ -602,18 +638,29 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidP
   const ownerUid = ownerUidProp || user?.uid
   const bottomRef = useRef();
   const inputRef  = useRef();
+  const seenMsgIds = useRef(new Set());
 
   useEffect(()=>{
     setMembers(project.members||[]);
   },[project.members]);
 
   useEffect(()=>{
+    seenMsgIds.current = new Set();
+  },[project.id, channel]);
+
+  useEffect(()=>{
     if (!user || !ownerUid) return;
     const unsub = listenMessages(ownerUid, project.id, channel, (msgs)=>{
+      const truly = msgs.filter(m=>!seenMsgIds.current.has(m.id) && m.uid !== currentUser?.id);
+      if(truly.length > 0 && seenMsgIds.current.size > 0){
+        playMsgBeep();
+        onNewMsg?.();
+      }
+      msgs.forEach(m=>seenMsgIds.current.add(m.id));
       setMessages(msgs.map(m=>({...m, ts: m.createdAt ? new Date(m.createdAt) : m.ts})));
     });
     return unsub;
-  },[user, project.id, channel]);
+  },[user, ownerUid, project.id, channel]);
 
   useEffect(()=>{
     bottomRef.current?.scrollIntoView({behavior:"smooth"});
@@ -786,7 +833,7 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidP
                         const newMem={id:u.id||uid(),name:u.name||u.email.split('@')[0],email:u.email,role:'member'}
                         const updatedMems=[...members,newMem]
                         setMembers(updatedMems)
-                        updateProject(user.uid,project.id,{members:updatedMems})
+                        updateProject(ownerUid,project.id,{members:updatedMems})
                         showToast(`${newMem.name} adăugat în proiect`,T.green)
                       }} style={{background:T.accentBg,border:`1px solid ${T.accent}44`,borderRadius:6,padding:'4px 10px',color:T.accent,fontSize:10,cursor:'pointer',fontFamily:'inherit',fontWeight:600,flexShrink:0}}>
                         + Adaugă
@@ -1315,11 +1362,12 @@ const AvizeView=({project,onUpdate,onAddAviz,onRemoveAviz,T,autoOpenAviz})=>{
 
 /* ─── TABS ───────────────────────────────────────────────────────────────────── */
 const TABS=[
-  {id:"faze",     label:"Faze",     I:Layers},
-  {id:"avize",    label:"Avize",    I:Building2},
-  {id:"gantt",    label:"Timeline", I:BarChart2},
-  {id:"chat",     label:"Chat",     I:MessageSquare},
-  {id:"contract", label:"Contract", I:FileText,    locked:true},
+  {id:"faze",        label:"Faze",         I:Layers},
+  {id:"avize",       label:"Avize",        I:Building2},
+  {id:"specialitati",label:"Specialități", I:CheckSquare},
+  {id:"gantt",       label:"Timeline",     I:BarChart2},
+  {id:"chat",        label:"Chat",         I:MessageSquare},
+  {id:"contract",    label:"Contract",     I:FileText,    locked:true},
 ];
 const PROTECTED_NAV=['financiar'];
 const ADMIN_PIN_KEY='archplan_admin_pin';
@@ -1830,6 +1878,174 @@ const AvizeDashboard = ({projects, T, onNavigate}) => {
   )
 }
 
+/* ─── SPECIALITĂȚI VIEW ──────────────────────────────────────────────────────── */
+const mkSpec = (typeId, label) => ({
+  specId: uid()+'_'+typeId,
+  typeId,
+  customName: label||'',
+  status: 'pending',
+  responsible: '',
+  notes: '',
+  dueDate: '',
+  attachments: [],
+});
+
+const SpecialitatiView = ({project, onUpdate, onAdd, onRemove, T}) => {
+  const [open, setOpen] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const specs = project.specialitati || [];
+  const usedIds = new Set(specs.map(s=>s.typeId));
+  const available = SPECIALITATI_LIST.filter(s=>!usedIds.has(s.id));
+
+  const inp = {background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:6,padding:'5px 9px',color:T.text,fontSize:11,outline:'none',fontFamily:'inherit',width:'100%',boxSizing:'border-box'};
+
+  return(
+    <div>
+      {/* Header row */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:T.textMd,textTransform:'uppercase',letterSpacing:.8}}>Specialități ({specs.length})</div>
+        <button onClick={()=>setShowAdd(s=>!s)}
+          style={{display:'flex',alignItems:'center',gap:5,background:T.accentBg,border:`1px solid ${T.accent}44`,borderRadius:7,padding:'5px 12px',color:T.accentLt,fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+          <Plus size={11}/>Adaugă specialitate
+        </button>
+      </div>
+
+      {/* Add panel */}
+      {showAdd&&(
+        <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,padding:14,marginBottom:14}}>
+          <div style={{fontSize:10,fontWeight:700,color:T.textDim,textTransform:'uppercase',letterSpacing:.7,marginBottom:10}}>Specialitate predefinită</div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}}>
+            {available.map(s=>(
+              <button key={s.id} onClick={()=>{onAdd(mkSpec(s.id,s.label));setShowAdd(false);}}
+                style={{display:'flex',alignItems:'center',gap:6,background:`${s.color}12`,border:`1px solid ${s.color}44`,borderRadius:7,padding:'5px 11px',color:s.color,fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                {s.label}
+              </button>
+            ))}
+            {available.length===0&&<span style={{fontSize:11,color:T.textDim}}>Toate specialitățile predefinite au fost adăugate.</span>}
+          </div>
+          <div style={{fontSize:10,fontWeight:700,color:T.textDim,textTransform:'uppercase',letterSpacing:.7,marginBottom:6}}>Specialitate personalizată</div>
+          <div style={{display:'flex',gap:6}}>
+            <input value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="Denumire specialitate…" style={{...inp,flex:1}} onKeyDown={e=>e.key==='Enter'&&customName.trim()&&(onAdd(mkSpec('custom_'+uid(),customName.trim())),setCustomName(''),setShowAdd(false))}/>
+            <button onClick={()=>{if(!customName.trim())return;onAdd(mkSpec('custom_'+uid(),customName.trim()));setCustomName('');setShowAdd(false);}}
+              style={{background:T.accent,border:'none',borderRadius:7,padding:'5px 14px',color:'#fff',fontWeight:600,cursor:'pointer',fontSize:11,fontFamily:'inherit',flexShrink:0}}>Adaugă</button>
+            <button onClick={()=>{setShowAdd(false);setCustomName('');}} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:7,padding:'5px 9px',color:T.textDim,cursor:'pointer',display:'flex'}}><X size={12}/></button>
+          </div>
+        </div>
+      )}
+
+      {specs.length===0&&!showAdd&&(
+        <div style={{textAlign:'center',padding:'40px 0',color:T.textDim}}>
+          <Layers size={24} color={T.borderLt} style={{display:'block',margin:'0 auto 10px'}}/>
+          <div style={{fontSize:13,marginBottom:3}}>Nicio specialitate adăugată</div>
+          <div style={{fontSize:11}}>Adaugă specialitățile implicate în proiect</div>
+        </div>
+      )}
+
+      {/* Spec list */}
+      {specs.map((spec,i)=>{
+        const def = SPECIALITATI_LIST.find(s=>s.id===spec.typeId);
+        const color = def?.color || '#58a6ff';
+        const label = def?.label || spec.customName || spec.typeId;
+        const st = SPEC_STATUSES.find(s=>s.id===spec.status)||SPEC_STATUSES[0];
+        const isOpen = open===spec.specId;
+        return(
+          <div key={spec.specId} style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:8,overflow:'hidden'}}>
+            {/* Row */}
+            <div onClick={()=>setOpen(isOpen?null:spec.specId)}
+              style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',cursor:'pointer',transition:'background .1s'}}
+              onMouseEnter={e=>e.currentTarget.style.background=T.panelHov}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              {/* Done toggle */}
+              <div onClick={e=>{e.stopPropagation();onUpdate(spec.specId,{status:spec.status==='done'?'pending':'done'});}}
+                style={{width:18,height:18,borderRadius:'50%',flexShrink:0,cursor:'pointer',border:`2px solid ${spec.status==='done'?T.green:T.borderLt}`,background:spec.status==='done'?T.green:'transparent',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s'}}
+                onMouseEnter={e=>{if(spec.status!=='done'){e.currentTarget.style.borderColor=T.green;e.currentTarget.style.background=T.greenBg;}}}
+                onMouseLeave={e=>{if(spec.status!=='done'){e.currentTarget.style.borderColor=T.borderLt;e.currentTarget.style.background='transparent';}}}>
+                {spec.status==='done'&&<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              {/* Color dot */}
+              <div style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
+              {/* Label */}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{label}</div>
+                {spec.responsible&&<div style={{fontSize:10,color:T.textDim,marginTop:1}}>Responsabil: {spec.responsible}</div>}
+              </div>
+              {/* Status chip */}
+              <select value={spec.status} onClick={e=>e.stopPropagation()} onChange={e=>{e.stopPropagation();onUpdate(spec.specId,{status:e.target.value});}}
+                style={{background:`${st.color}14`,border:`1px solid ${st.color}44`,borderRadius:6,padding:'3px 8px',color:st.color,fontSize:11,fontWeight:600,outline:'none',fontFamily:'inherit',cursor:'pointer'}}>
+                {SPEC_STATUSES.map(s=><option key={s.id} value={s.id} style={{background:T.panel,color:s.color}}>{s.label}</option>)}
+              </select>
+              {/* Due date */}
+              {spec.dueDate&&<span style={{fontSize:10,color:T.textDim,flexShrink:0}}>{spec.dueDate}</span>}
+              {/* Delete */}
+              <button onClick={e=>{e.stopPropagation();onRemove(spec.specId);}}
+                style={{background:'transparent',border:'none',color:T.textDim,cursor:'pointer',padding:2,display:'flex',flexShrink:0}}
+                title="Șterge">
+                <Trash2 size={13}/>
+              </button>
+              <ChevronDown size={12} color={T.textDim} style={{transform:isOpen?'rotate(180deg)':'none',transition:'transform .15s',flexShrink:0}}/>
+            </div>
+
+            {/* Detail panel */}
+            {isOpen&&(
+              <div style={{padding:'12px 14px 14px',borderTop:`1px solid ${T.border}`,background:T.panelHov}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}}>
+                  <div>
+                    <div style={{fontSize:9,color:T.textDim,marginBottom:3,textTransform:'uppercase',letterSpacing:.5}}>Responsabil</div>
+                    <input value={spec.responsible||''} onChange={e=>onUpdate(spec.specId,{responsible:e.target.value})} placeholder="Nume responsabil…" style={inp}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:T.textDim,marginBottom:3,textTransform:'uppercase',letterSpacing:.5}}>Termen</div>
+                    <input type="date" value={spec.dueDate||''} onChange={e=>onUpdate(spec.specId,{dueDate:e.target.value})} style={inp}/>
+                  </div>
+                  <div style={{gridColumn:'1/-1'}}>
+                    <div style={{fontSize:9,color:T.textDim,marginBottom:3,textTransform:'uppercase',letterSpacing:.5}}>Notițe</div>
+                    <input value={spec.notes||''} onChange={e=>onUpdate(spec.specId,{notes:e.target.value})} placeholder="Detalii, observații…" style={inp}/>
+                  </div>
+                </div>
+                {/* Attachments */}
+                <div style={{fontSize:9,fontWeight:700,color:T.textDim,textTransform:'uppercase',letterSpacing:.7,marginBottom:6,display:'flex',alignItems:'center',gap:5}}><Link2 size={10}/>Documente</div>
+                {(spec.attachments||[]).map(att=>(
+                  <div key={att.id} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 10px',background:T.bg,borderRadius:6,border:`1px solid ${T.border}`,marginBottom:4}}>
+                    <FileText size={12} color={T.textMd}/>
+                    <a href={att.url} target="_blank" rel="noreferrer" style={{flex:1,fontSize:11,color:T.blue,textDecoration:'none',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{att.name||att.url}</a>
+                    <button onClick={()=>onUpdate(spec.specId,{attachments:(spec.attachments||[]).filter(a=>a.id!==att.id)})} style={{background:'transparent',border:'none',color:T.textDim,cursor:'pointer',padding:2,display:'flex'}}><X size={12}/></button>
+                  </div>
+                ))}
+                <AddLinkInline onAdd={({name,url})=>onUpdate(spec.specId,{attachments:[...(spec.attachments||[]),{id:uid(),name,url,addedAt:TODAY}]})} T={T}/>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/* ─── ADD LINK INLINE ────────────────────────────────────────────────────────── */
+const AddLinkInline = ({onAdd, T}) => {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const inp = {background:T.bg,border:`1px solid ${T.borderLt}`,borderRadius:6,padding:'5px 9px',color:T.text,fontSize:11,outline:'none',fontFamily:'inherit'};
+  if(!open) return(
+    <button onClick={()=>setOpen(true)} style={{display:'inline-flex',alignItems:'center',gap:5,background:T.accentBg,border:`1px solid ${T.accent}44`,color:T.accentLt,borderRadius:7,padding:'5px 11px',fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+      <Plus size={11}/>Adaugă link document
+    </button>
+  );
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:6,marginTop:4}}>
+      <input value={name} onChange={e=>setName(e.target.value)} placeholder="Nume document" style={inp}/>
+      <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://drive.google.com/…" style={inp}/>
+      <div style={{display:'flex',gap:6}}>
+        <button onClick={()=>{if(!url.trim())return;onAdd({name:name.trim()||url,url:url.trim()});setName('');setUrl('');setOpen(false);}}
+          style={{background:T.accent,border:'none',borderRadius:6,padding:'5px 12px',color:'#fff',fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Salvează</button>
+        <button onClick={()=>{setOpen(false);setName('');setUrl('');}} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:6,padding:'5px 10px',color:T.textMd,fontSize:11,cursor:'pointer',fontFamily:'inherit'}}>Anulează</button>
+      </div>
+    </div>
+  );
+};
+
 /* ─── MAIN APP ───────────────────────────────────────────────────────────────── */
 const slugify = (str) =>
   String(str).toLowerCase()
@@ -1857,7 +2073,7 @@ export default function App(){
   const location = useLocation()
   const _pp = location.pathname.split('/').filter(Boolean)
   const _rawKey = _pp[0]==='p' && _pp[1] ? _pp[1] : null
-  const VALID_TABS = new Set(['faze','avize','gantt','chat','contract'])
+  const VALID_TABS = new Set(['faze','avize','specialitati','gantt','chat','contract'])
   const tab = (_rawKey && _pp[2] && VALID_TABS.has(_pp[2])) ? _pp[2] : 'faze'
 
   const [projects,setProjects]=useState([]);
@@ -1898,6 +2114,8 @@ export default function App(){
   const [notes, setNotes] = useState([])
   const [approvedUsers, setApprovedUsers] = useState([])
   const [chatSeenProjects, setChatSeenProjects] = useState(new Set())
+  const [chatUnreadProjects, setChatUnreadProjects] = useState(new Set())
+  const [expandedUser, setExpandedUser] = useState(null)
   const [autoOpenAviz, setAutoOpenAviz] = useState(null)
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [pinModal, setPinModal] = useState(null) // {onSuccess:fn, hint:str}
@@ -1986,7 +2204,10 @@ export default function App(){
   },[user]);
 
   useEffect(()=>{
-    if(tab==='chat'&&selId) setChatSeenProjects(s=>new Set([...s,selId]))
+    if(tab==='chat'&&selId){
+      setChatSeenProjects(s=>new Set([...s,selId]))
+      setChatUnreadProjects(s=>{const n=new Set(s);n.delete(selId);return n;})
+    }
   },[tab,selId])
 
   // Track browser online state and RTDB connection
@@ -2128,6 +2349,34 @@ export default function App(){
     if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize}));
     else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,avize:newAvize}));
     updateProject(ownerUid,projId,{avize:newAvize}).catch(()=>showToast('Eroare salvare aviz',T.red));
+  };
+
+  const updSpecialitate=(projId,specId,data)=>{
+    const proj=allProjects.find(p=>p.id===projId);
+    if(!proj||!user) return;
+    const newSpecs=(proj.specialitati||[]).map(s=>s.specId!==specId?s:{...s,...data});
+    const ownerUid=proj._isCollab?proj.ownerUid:user.uid;
+    if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,specialitati:newSpecs}));
+    else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,specialitati:newSpecs}));
+    updateProject(ownerUid,projId,{specialitati:newSpecs}).catch(()=>showToast('Eroare salvare specialitate',T.red));
+  };
+  const addSpecialitate=(projId,spec)=>{
+    const proj=allProjects.find(p=>p.id===projId);
+    if(!proj||!user) return;
+    const newSpecs=[...(proj.specialitati||[]),spec];
+    const ownerUid=proj._isCollab?proj.ownerUid:user.uid;
+    if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,specialitati:newSpecs}));
+    else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,specialitati:newSpecs}));
+    updateProject(ownerUid,projId,{specialitati:newSpecs}).catch(()=>showToast('Eroare salvare specialitate',T.red));
+  };
+  const removeSpecialitate=(projId,specId)=>{
+    const proj=allProjects.find(p=>p.id===projId);
+    if(!proj||!user) return;
+    const newSpecs=(proj.specialitati||[]).filter(s=>s.specId!==specId);
+    const ownerUid=proj._isCollab?proj.ownerUid:user.uid;
+    if(proj._isCollab) setCollabProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,specialitati:newSpecs}));
+    else setProjects(ps=>ps.map(p=>p.id!==projId?p:{...p,specialitati:newSpecs}));
+    updateProject(ownerUid,projId,{specialitati:newSpecs}).catch(()=>showToast('Eroare salvare specialitate',T.red));
   };
 
   const handleInvite=async()=>{
@@ -2393,8 +2642,8 @@ export default function App(){
           style={{display:"flex",alignItems:"center",justifyContent:"center",position:'relative',background:sel&&tab==='chat'?T.accentBg:"transparent",border:`1px solid ${sel&&tab==='chat'?T.accent:T.border}`,borderRadius:7,width:32,height:32,color:sel&&tab==='chat'?T.accent:T.textMd,cursor:"pointer"}}
           title="Chat proiect">
           <MessageSquare size={14}/>
-          {sel&&tab!=='chat'&&!chatSeenProjects.has(selId)&&(
-            <span style={{position:'absolute',top:4,right:4,width:7,height:7,borderRadius:'50%',background:T.accent,border:`1.5px solid ${T.sidebar}`}}/>
+          {sel&&tab!=='chat'&&chatUnreadProjects.has(selId)&&(
+            <span style={{position:'absolute',top:4,right:4,width:7,height:7,borderRadius:'50%',background:T.red,border:`1.5px solid ${T.sidebar}`}}/>
           )}
         </button>
         <button onClick={()=>setThemeMode(m=>m==="dark"?"light":m==="light"?"auto":"dark")}
@@ -2798,7 +3047,7 @@ export default function App(){
                       <button key={t.id} onClick={()=>t.locked?requirePin(()=>switchTab(t.id),`Tabul "${t.label}" este protejat.`):switchTab(t.id)}
                         style={{display:"flex",alignItems:"center",gap:5,background:tab===t.id?T.panel:"transparent",border:`1px solid ${tab===t.id?T.border:"transparent"}`,borderRadius:6,padding:"5px 11px",color:tab===t.id?T.text:T.textDim,cursor:"pointer",fontSize:11,fontWeight:tab===t.id?600:400,fontFamily:"inherit",transition:"all .12s"}}>
                         {t.locked&&!adminUnlocked?<Lock size={11}/>:<t.I size={12}/>}{t.label}
-                        {t.id==="chat"&&<span style={{width:6,height:6,borderRadius:"50%",background:T.accent,display:"block"}}/>}
+                        {t.id==="chat"&&chatUnreadProjects.has(selId)&&tab!=='chat'&&<span style={{width:6,height:6,borderRadius:"50%",background:T.red,display:"block"}}/>}
                       </button>
                     ))}
                   </div>
@@ -2810,6 +3059,7 @@ export default function App(){
 
               {tab==="faze"&&<PhasesView project={sel} onUpdate={(phId,data)=>updPhase(sel.id,phId,data)} T={T}/>}
               {tab==="avize"&&<AvizeView project={sel} onUpdate={(avId,data)=>updAviz(sel.id,avId,data)} onAddAviz={(av)=>addAviz(sel.id,av)} onRemoveAviz={(avId)=>removeAviz(sel.id,avId)} T={T} autoOpenAviz={autoOpenAviz}/>}
+              {tab==="specialitati"&&<SpecialitatiView project={sel} onUpdate={(specId,data)=>updSpecialitate(sel.id,specId,data)} onAdd={(spec)=>addSpecialitate(sel.id,spec)} onRemove={(specId)=>removeSpecialitate(sel.id,specId)} T={T}/>}
               {tab==="gantt"&&(
                 <div style={{background:T.panel,borderRadius:10,padding:20,border:`1px solid ${T.border}`}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
@@ -2864,7 +3114,7 @@ export default function App(){
                   </div>
                 </div>
               )}
-              {tab==="chat"&&<Chat project={sel} T={T} currentUser={CURRENT_USER} showToast={showToast} approvedUsers={approvedUsers} ownerUid={sel._isCollab?sel.ownerUid:user.uid}/>}
+              {tab==="chat"&&<Chat project={sel} T={T} currentUser={CURRENT_USER} showToast={showToast} approvedUsers={approvedUsers} ownerUid={sel._isCollab?sel.ownerUid:user.uid} onNewMsg={()=>setChatUnreadProjects(s=>new Set([...s,sel.id]))}/>}
               {tab==="contract"&&<ContractView project={sel} T={T} onUpdate={(data)=>{
                 if(!user) return
                 updateProject(user.uid,sel.id,data)
@@ -3097,42 +3347,106 @@ export default function App(){
                 </div>
               </div>
             )}
-            {/* Approved users */}
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:.8,marginBottom:12,display:"flex",alignItems:"center",gap:6}}>
-                <CheckCircle size={12}/>Utilizatori activi ({approvedUsers.length})
-              </div>
-              <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,overflow:"hidden"}}>
-                {approvedUsers.length===0&&<div style={{padding:"20px 16px",fontSize:12,color:T.textDim,textAlign:"center"}}>Niciun utilizator aprobat</div>}
-                {approvedUsers.map((u,i)=>{
-                  const isMe = user&&u.email===user.email
-                  const projCount = [...projects,...collabProjects].filter(p=>p._isCollab?p.ownerEmail===u.email:false).length
-                  return(
-                    <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<approvedUsers.length-1?`1px solid ${T.border}`:"none",background:isMe?`${T.accent}08`:""}}>
-                      <Avatar name={u.name||u.email} email={u.email} size={32}/>
-                      <div style={{flex:1}}>
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:13,fontWeight:600,color:T.text}}>{u.name||u.email}</span>
-                          {isMe&&<span style={{fontSize:9,background:`${T.accent}20`,color:T.accent,borderRadius:4,padding:"1px 6px",fontWeight:700}}>Tu</span>}
+            {/* Approved users — with per-project permissions */}
+            {(()=>{
+              const myProjects = projects; // owner's own projects
+              return(
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:T.textDim,textTransform:"uppercase",letterSpacing:.8,marginBottom:12,display:"flex",alignItems:"center",gap:6}}>
+                  <CheckCircle size={12}/>Utilizatori activi ({approvedUsers.length})
+                </div>
+                <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:10,overflow:"hidden"}}>
+                  {approvedUsers.length===0&&<div style={{padding:"20px 16px",fontSize:12,color:T.textDim,textAlign:"center"}}>Niciun utilizator aprobat</div>}
+                  {approvedUsers.map((u,i)=>{
+                    const isMe = user&&u.email===user.email
+                    const isExpanded = expandedUser===u.id
+                    // Check membership in each project: project.members[] or projMembers
+                    const userProjects = myProjects.map(p=>{
+                      const mem = (p.members||[]).find(m=>m.email===u.email)
+                      return mem?{...p,memberRole:mem.role}:null
+                    }).filter(Boolean)
+                    return(
+                      <div key={u.id} style={{borderBottom:i<approvedUsers.length-1?`1px solid ${T.border}`:"none"}}>
+                        {/* User row */}
+                        <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:isMe?`${T.accent}08`:isExpanded?T.panelHov:"",cursor:"pointer",transition:'background .1s'}}
+                          onClick={()=>setExpandedUser(isExpanded?null:u.id)}
+                          onMouseEnter={e=>!isExpanded&&!isMe&&(e.currentTarget.style.background=T.panelHov)}
+                          onMouseLeave={e=>!isExpanded&&!isMe&&(e.currentTarget.style.background='transparent')}>
+                          <Avatar name={u.name||u.email} email={u.email} size={32}/>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{fontSize:13,fontWeight:600,color:T.text}}>{u.name||u.email}</span>
+                              {isMe&&<span style={{fontSize:9,background:`${T.accent}20`,color:T.accent,borderRadius:4,padding:"1px 6px",fontWeight:700}}>Tu</span>}
+                            </div>
+                            <div style={{fontSize:11,color:T.textDim}}>{u.email}</div>
+                          </div>
+                          <div style={{fontSize:10,color:T.textDim,textAlign:"right",flexShrink:0}}>
+                            <div style={{marginBottom:2}}>Aprobat {u.requestedAt?new Date(u.requestedAt).toLocaleDateString('ro-RO'):''}</div>
+                            <div style={{color:userProjects.length>0?T.accent:T.textDim}}>{userProjects.length} proiect{userProjects.length!==1?'e':''}</div>
+                          </div>
+                          <ChevronDown size={13} color={T.textDim} style={{transform:isExpanded?'rotate(180deg)':'none',transition:'transform .15s',flexShrink:0}}/>
+                          {!isMe&&(
+                            <button onClick={e=>{e.stopPropagation();if(!window.confirm(`Revocare acces pentru ${u.email}?`))return;revokeAccess(u.email).then(()=>showToast(`Acces revocat: ${u.email}`,T.red));}}
+                              style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 12px",color:T.textMd,fontSize:11,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+                              <X size={11}/>Revocă
+                            </button>
+                          )}
                         </div>
-                        <div style={{fontSize:11,color:T.textDim}}>{u.email}</div>
+
+                        {/* Expanded: per-project permissions */}
+                        {isExpanded&&(
+                          <div style={{background:T.bg,borderTop:`1px solid ${T.border}`,padding:'12px 16px'}}>
+                            <div style={{fontSize:10,fontWeight:700,color:T.textDim,textTransform:'uppercase',letterSpacing:.7,marginBottom:10}}>Acces proiecte</div>
+                            {myProjects.length===0&&<div style={{fontSize:11,color:T.textDim}}>Nu există proiecte proprii.</div>}
+                            {myProjects.map(p=>{
+                              const mem=(p.members||[]).find(m=>m.email===u.email)
+                              const hasMem = !!mem
+                              const role = mem?.role||'viewer'
+                              const toggleAccess=()=>{
+                                let newMems
+                                if(hasMem) newMems=(p.members||[]).filter(m=>m.email!==u.email)
+                                else newMems=[...(p.members||[]),{id:uid(),name:u.name||u.email.split('@')[0],email:u.email,role:'editor'}]
+                                updateProject(user.uid,p.id,{members:newMems})
+                                setProjects(ps=>ps.map(x=>x.id!==p.id?x:{...x,members:newMems}))
+                                showToast(hasMem?`${u.email} eliminat din ${p.name}`:`${u.email} adăugat în ${p.name}`,hasMem?T.red:T.green)
+                              }
+                              const changeRole=(newRole)=>{
+                                const newMems=(p.members||[]).map(m=>m.email===u.email?{...m,role:newRole}:m)
+                                updateProject(user.uid,p.id,{members:newMems})
+                                setProjects(ps=>ps.map(x=>x.id!==p.id?x:{...x,members:newMems}))
+                              }
+                              const tc=projTypeColor(p.type)
+                              return(
+                                <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',borderRadius:8,marginBottom:4,background:hasMem?`${T.green}08`:T.panel,border:`1px solid ${hasMem?T.green+'33':T.border}`}}>
+                                  <div style={{width:7,height:7,borderRadius:'50%',background:tc,flexShrink:0}}/>
+                                  <div style={{flex:1,minWidth:0}}>
+                                    <div style={{fontSize:12,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</div>
+                                    {p.client&&<div style={{fontSize:10,color:T.textDim}}>{p.client}</div>}
+                                  </div>
+                                  {hasMem&&(
+                                    <select value={role} onChange={e=>changeRole(e.target.value)}
+                                      style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:5,padding:'3px 7px',color:T.textMd,fontSize:10,outline:'none',fontFamily:'inherit',cursor:'pointer'}}>
+                                      <option value="owner">Owner</option>
+                                      <option value="editor">Editor</option>
+                                      <option value="viewer">Viewer</option>
+                                      <option value="member">Membru</option>
+                                    </select>
+                                  )}
+                                  <button onClick={toggleAccess}
+                                    style={{background:hasMem?T.redBg:T.greenBg,border:`1px solid ${hasMem?T.red:T.green}44`,borderRadius:6,padding:'4px 10px',color:hasMem?T.red:T.green,fontSize:10,cursor:'pointer',fontFamily:'inherit',fontWeight:600,flexShrink:0}}>
+                                    {hasMem?'Elimină':'Acordă acces'}
+                                  </button>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
-                      <div style={{fontSize:10,color:T.textDim,textAlign:"right"}}>
-                        <div>Aprobat {u.requestedAt?new Date(u.requestedAt).toLocaleDateString('ro-RO'):''}</div>
-                      </div>
-                      {!isMe&&(
-                        <button onClick={()=>{
-                          if(!window.confirm(`Revocare acces pentru ${u.email}?`)) return
-                          revokeAccess(u.email).then(()=>showToast(`Acces revocat: ${u.email}`,T.red))
-                        }} style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 12px",color:T.textMd,fontSize:11,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
-                          <X size={11}/>Revocă
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
-            </div>
+            )})()}
           </div>
         </div>
       )}
