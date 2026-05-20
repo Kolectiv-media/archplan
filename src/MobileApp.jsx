@@ -1676,6 +1676,11 @@ export default function MobileApp() {
       {showNewProj && (
         <NewProjectSheet T={T} onClose={() => setShowNewProj(false)} onSave={handleCreateProject} />
       )}
+
+      {/* Invite collaborator sheet */}
+      {inviteProject && (
+        <InviteSheet project={inviteProject} user={user} T={T} toast={toast} onClose={() => setInviteProject(null)} />
+      )}
     </div>
   )
 }
