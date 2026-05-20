@@ -618,6 +618,47 @@ const playMsgBeep = () => {
   } catch(e) {}
 }
 
+/* ─── MSG ROW ────────────────────────────────────────────────────────────────── */
+const MsgRow = ({msg, members, currentUser, deleteMsg, T}) => {
+  const [showDel, setShowDel] = useState(false);
+  const member = members.find(m=>m.id===msg.uid);
+  const name   = member?.name || msg.displayName || "?";
+  const email  = member?.email || "";
+  const isMine = msg.uid === currentUser?.id;
+  return(
+    <div style={{display:"flex",gap:10,padding:"5px 0",position:"relative",alignItems:"flex-start"}}
+      onMouseEnter={()=>setShowDel(true)} onMouseLeave={()=>setShowDel(false)}>
+      <Avatar name={name} email={email} size={30}/>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:3}}>
+          <span style={{fontSize:12,fontWeight:700,color:T.text}}>{name}</span>
+          <span style={{fontSize:10,color:T.textDim}}>{fmtT(msg.ts)}</span>
+          {isMine&&<Chip label="tu" color={T.textDim} T={T}/>}
+        </div>
+        {msg.text&&(
+          <div style={{fontSize:13,color:T.textMd,lineHeight:1.55,wordBreak:"break-word"}}>
+            <MsgText text={msg.text} T={T}/>
+          </div>
+        )}
+        {(msg.attachments||[]).map(att=>(
+          <div key={att.id} style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:5,background:T.panelHov,border:`1px solid ${T.border}`,borderRadius:7,padding:"5px 10px",maxWidth:300}}>
+            {att.external?<Link2 size={12} color={T.textMd}/>:<FileText size={12} color={T.textMd}/>}
+            <a href={att.url} target="_blank" rel="noreferrer" style={{fontSize:11,color:T.blue,textDecoration:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{att.name}</a>
+            {att.external&&<Chip label="link" color={T.amber} T={T}/>}
+            <ExternalLink size={10} color={T.textDim}/>
+          </div>
+        ))}
+      </div>
+      {isMine&&showDel&&(
+        <button onClick={()=>deleteMsg(msg.id)}
+          style={{position:"absolute",right:0,top:4,background:T.redBg,border:`1px solid ${T.red}44`,borderRadius:5,padding:"3px 7px",cursor:"pointer",display:"flex",alignItems:"center",gap:3,color:T.red,fontSize:10,fontFamily:"inherit"}}>
+          <Trash2 size={10}/>Șterge
+        </button>
+      )}
+    </div>
+  );
+};
+
 /* ─── CHAT COMPONENT ─────────────────────────────────────────────────────────── */
 const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidProp,onNewMsg})=>{
   const [channel,   setChannel]   = useState("general");
@@ -870,45 +911,9 @@ const Chat=({project,T,currentUser,showToast,approvedUsers=[],ownerUid:ownerUidP
                   <div style={{fontSize:11}}>Fii primul care scrie ceva</div>
                 </div>
               )}
-              {messages.map((msg,i)=>{
-                const member=members.find(m=>m.id===msg.uid);
-                const name=member?.name||msg.displayName||"?";
-                const email=member?.email||"";
-                const isMine=msg.uid===currentUser.id;
-                const [showDel,setShowDel]=useState(false);
-                return(
-                  <div key={msg.id} style={{display:"flex",gap:10,padding:"5px 0",position:"relative",alignItems:"flex-start"}}
-                    onMouseEnter={()=>setShowDel(true)} onMouseLeave={()=>setShowDel(false)}>
-                    <Avatar name={name} email={email} size={30}/>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:3}}>
-                        <span style={{fontSize:12,fontWeight:700,color:T.text}}>{name}</span>
-                        <span style={{fontSize:10,color:T.textDim}}>{fmtT(msg.ts)}</span>
-                        {isMine&&<Chip label="tu" color={T.textDim} T={T}/>}
-                      </div>
-                      {msg.text&&(
-                        <div style={{fontSize:13,color:T.textMd,lineHeight:1.55,wordBreak:"break-word"}}>
-                          <MsgText text={msg.text} T={T}/>
-                        </div>
-                      )}
-                      {(msg.attachments||[]).map(att=>(
-                        <div key={att.id} style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:5,background:T.panelHov,border:`1px solid ${T.border}`,borderRadius:7,padding:"5px 10px",maxWidth:300}}>
-                          {att.external?<Link2 size={12} color={T.textMd}/>:<FileText size={12} color={T.textMd}/>}
-                          <a href={att.url} target="_blank" rel="noreferrer" style={{fontSize:11,color:T.blue,textDecoration:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{att.name}</a>
-                          {att.external&&<Chip label="link" color={T.amber} T={T}/>}
-                          <ExternalLink size={10} color={T.textDim}/>
-                        </div>
-                      ))}
-                    </div>
-                    {isMine&&showDel&&(
-                      <button onClick={()=>deleteMsg(msg.id)}
-                        style={{position:"absolute",right:0,top:4,background:T.redBg,border:`1px solid ${T.red}44`,borderRadius:5,padding:"3px 7px",cursor:"pointer",display:"flex",alignItems:"center",gap:3,color:T.red,fontSize:10,fontFamily:"inherit"}}>
-                        <Trash2 size={10}/>Șterge
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+              {messages.map(msg=>(
+                <MsgRow key={msg.id} msg={msg} members={members} currentUser={currentUser} deleteMsg={deleteMsg} T={T}/>
+              ))}
               <div ref={bottomRef}/>
             </div>
 
